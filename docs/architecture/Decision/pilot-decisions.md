@@ -75,7 +75,7 @@ Decisions settled in the grilling session of 2026-10-27, on the MVP pilot propos
 | # | Decision | Why |
 |---|---|---|
 | D34 | Issues and specs live as GitHub issues in `Torresfong/acounting-saas`, using the `gh` CLI. The pilot spec itself is kept as a file in `docs/product/`. | The remote already exists and Issues are enabled. |
-| D35 | The repository is a multi-context monorepo with `backend/` and `frontend/` as the contexts, recorded in `docs/agents/domain.md`. | Stated by the product owner. To be revisited if `frontend/` is dropped under the Django stack. |
+| D35 | The repository is a multi-context monorepo with `backend/` as its only context for now, recorded in `docs/agents/domain.md`. | Stated by the product owner. The separate `frontend/` folder was removed when the scaffold moved to Django (D10), because pages are server-rendered. |
 
 ## Still open
 

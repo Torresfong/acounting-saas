@@ -2,12 +2,12 @@
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
-This is a multi-context monorepo. The contexts are `backend/` and `frontend/`.
+This is a multi-context monorepo. The only context today is `backend/` (the Django app); there is no separate frontend, since pages are server-rendered. Add a context here and in `GLOSSARY-MAP.md` if another one appears.
 
 ## Before exploring, read these
 
 - **`GLOSSARY-MAP.md`** at the repo root: it points at one `GLOSSARY.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`**: system-wide decisions. Read ADRs that touch the area you're about to work in. Also check `backend/docs/adr/` and `frontend/docs/adr/` for context-scoped decisions.
+- **`docs/adr/`**: system-wide decisions. Read ADRs that touch the area you're about to work in. Also check `backend/docs/adr/` for context-scoped decisions.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
@@ -17,15 +17,12 @@ If any of these files don't exist, **proceed silently**. Don't flag their absenc
 /
 ├── GLOSSARY-MAP.md
 ├── docs/adr/                          ← system-wide decisions
-├── backend/
-│   ├── GLOSSARY.md
-│   └── docs/adr/                      ← context-specific decisions
-└── frontend/
+└── backend/
     ├── GLOSSARY.md
-    └── docs/adr/
+    └── docs/adr/                      ← context-specific decisions
 ```
 
-The pilot spec lives in `docs/product/`. If the `frontend/` folder is removed or merged into `backend/` (the spec moves the stack to a single Django app with HTMX), update the contexts here and in `GLOSSARY-MAP.md`.
+The pilot spec lives in `docs/product/`.
 
 ## Use the glossary's vocabulary
 
