@@ -76,6 +76,7 @@ Decisions settled in the grilling session of 2026-10-27, on the MVP pilot propos
 |---|---|---|
 | D34 | Issues and specs live as GitHub issues in `Torresfong/acounting-saas`, using the `gh` CLI. The pilot spec itself is kept as a file in `docs/product/`. | The remote already exists and Issues are enabled. |
 | D35 | The repository is a multi-context monorepo with `backend/` as its only context for now, recorded in `docs/agents/domain.md`. | Stated by the product owner. The separate `frontend/` folder was removed when the scaffold moved to Django (D10), because pages are server-rendered. |
+| D36 | The job queue is tenant-scoped, not global: jobs carry a company id under row-level security with a web role and a separate worker role; payloads hold identifiers only and failed jobs keep only the exception class. See `docs/adr/0001-job-queue-and-tenancy.md`. | An independent review showed that a global queue lets any tenant request see or queue other tenants' work, and that D11 applies to the queue. The payload and error rules are built in ticket 01; the column, policy and roles come with ticket 02. |
 
 ## Still open
 

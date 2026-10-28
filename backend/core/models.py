@@ -2,9 +2,10 @@ from django.db import models
 
 
 class Job(models.Model):
-    """A queued background job. Global system table, deliberately outside row-level security.
+    """A queued background job.
 
-    See docs/adr/0001-jobs-are-global.md. `payload` holds identifiers only and `error` holds only an
+    Interim: no company id and no row-level security yet; ticket 02 adds both (see
+    docs/adr/0001-job-queue-and-tenancy.md). `payload` holds identifiers only and `error` holds only an
     exception class name, so the table never contains tenant content.
     """
 

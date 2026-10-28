@@ -1,10 +1,11 @@
 """Postgres-backed job queue (D10): no broker. Tests call run_pending() in-process.
 
-The queue is global by design (see docs/adr/0001-jobs-are-global.md). Payloads must carry
-identifiers only (a company id and record ids), never document content or personal data.
+See docs/adr/0001-job-queue-and-tenancy.md. Payloads carry identifiers only, and enqueue() enforces it.
+Until ticket 02 the table is global; from then on jobs carry a company id under row-level security.
 """
 
 import logging
+import uuid
 
 from django.db import transaction
 from django.utils import timezone
@@ -15,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 HANDLERS = {}
 
+# Longest string accepted in a payload: enough for an id or reference number, too short for content.
+MAX_STRING_LENGTH = 40
+
 
 def register(name):
     def decorator(func):
@@ -24,8 +28,24 @@ def register(name):
     return decorator
 
 
+class JobPayloadError(ValueError):
+    pass
+
+
+def _identifier(key, value):
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, str) and len(value) <= MAX_STRING_LENGTH:
+        return value
+    # Name the key only: echoing the value would put the content we are refusing into an error.
+    raise JobPayloadError(f"Job payload '{key}' must be an identifier (int, UUID, bool, None or a short string)")
+
+
 def enqueue(name, **payload):
-    return Job.objects.create(name=name, payload=payload)
+    clean = {key: _identifier(key, value) for key, value in payload.items()}
+    return Job.objects.create(name=name, payload=clean)
 
 
 def run_pending(limit=100):

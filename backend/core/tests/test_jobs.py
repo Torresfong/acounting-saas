@@ -1,3 +1,6 @@
+import uuid
+from decimal import Decimal
+
 import pytest
 
 from core import jobs
@@ -49,11 +52,11 @@ def test_a_failing_job_is_recorded_and_does_not_block_the_next_one(registry):
 def test_a_failed_job_never_stores_or_logs_the_content_that_made_it_fail(registry, caplog):
     secret = "Supplier ACME Sdn Bhd, TIN C2345678901, total RM 18,450.00"
 
-    def echo_content(document_text):
-        raise ValueError(f"cannot parse total in: {document_text}")
+    def echo_content(document_id):
+        raise ValueError(f"cannot parse total in: {secret}")
 
     jobs.register("extract")(echo_content)
-    jobs.enqueue("extract", document_text=secret)
+    jobs.enqueue("extract", document_id=7)
 
     with caplog.at_level("DEBUG"):
         jobs.run_pending()
@@ -66,8 +69,39 @@ def test_a_failed_job_never_stores_or_logs_the_content_that_made_it_fail(registr
 
 
 @pytest.mark.django_db
-def test_a_job_with_no_registered_handler_fails_instead_of_vanishing(registry):
-    jobs.enqueue("unknown")
-    jobs.run_pending()
+@pytest.mark.parametrize(
+    "value",
+    [
+        7,
+        True,
+        None,
+        uuid.uuid4(),
+        "INV-2026-000123",
+        "x" * jobs.MAX_STRING_LENGTH,
+    ],
+)
+def test_identifiers_are_accepted_in_a_payload(registry, value):
+    jobs.enqueue("record", ref=value)
 
-    assert Job.objects.get().status == Job.FAILED
+    assert Job.objects.count() == 1
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Supplier ACME Sdn Bhd, TIN C2345678901, total RM 18,450.00",
+        "x" * (jobs.MAX_STRING_LENGTH + 1),
+        18450.0,
+        Decimal("18450.00"),
+        {"tin": "C2345678901"},
+        ["C2345678901"],
+    ],
+)
+def test_content_is_refused_in_a_payload_and_never_echoed_back(registry, value):
+    with pytest.raises(jobs.JobPayloadError) as excinfo:
+        jobs.enqueue("record", document_text=value)
+
+    assert Job.objects.count() == 0
+    assert "C2345678901" not in str(excinfo.value) and "ACME" not in str(excinfo.value)
+    assert "document_text" in str(excinfo.value)  # names the offending key, never the value
