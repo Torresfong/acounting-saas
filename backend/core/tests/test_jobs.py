@@ -41,8 +41,28 @@ def test_a_failing_job_is_recorded_and_does_not_block_the_next_one(registry):
 
     failed = Job.objects.get(name="boom")
     assert failed.status == Job.FAILED
-    assert "bad input" in failed.error
+    assert failed.error == "ValueError"
     assert seen == ["ok"]
+
+
+@pytest.mark.django_db
+def test_a_failed_job_never_stores_or_logs_the_content_that_made_it_fail(registry, caplog):
+    secret = "Supplier ACME Sdn Bhd, TIN C2345678901, total RM 18,450.00"
+
+    def echo_content(document_text):
+        raise ValueError(f"cannot parse total in: {document_text}")
+
+    jobs.register("extract")(echo_content)
+    jobs.enqueue("extract", document_text=secret)
+
+    with caplog.at_level("DEBUG"):
+        jobs.run_pending()
+
+    failed = Job.objects.get()
+    assert failed.status == Job.FAILED
+    assert "ACME" not in failed.error and "C2345678901" not in failed.error
+    assert "ACME" not in caplog.text and "C2345678901" not in caplog.text
+    assert "ValueError" in caplog.text  # still enough to debug from: which job, which error class
 
 
 @pytest.mark.django_db

@@ -2,7 +2,11 @@ from django.db import models
 
 
 class Job(models.Model):
-    """A queued background job. System table: not tenant data, so it carries no company id."""
+    """A queued background job. Global system table, deliberately outside row-level security.
+
+    See docs/adr/0001-jobs-are-global.md. `payload` holds identifiers only and `error` holds only an
+    exception class name, so the table never contains tenant content.
+    """
 
     PENDING = "pending"
     DONE = "done"

@@ -1,9 +1,17 @@
-"""Postgres-backed job queue (D10): no broker. Tests call run_pending() in-process."""
+"""Postgres-backed job queue (D10): no broker. Tests call run_pending() in-process.
+
+The queue is global by design (see docs/adr/0001-jobs-are-global.md). Payloads must carry
+identifiers only (a company id and record ids), never document content or personal data.
+"""
+
+import logging
 
 from django.db import transaction
 from django.utils import timezone
 
 from .models import Job
+
+logger = logging.getLogger(__name__)
 
 HANDLERS = {}
 
@@ -45,8 +53,10 @@ def run_pending(limit=100):
                 with transaction.atomic():
                     handler(**job.payload)
             except Exception as exc:
+                # Exception messages often echo tenant content, so only the class is kept or logged.
                 job.status = Job.FAILED
-                job.error = f"{type(exc).__name__}: {exc}"
+                job.error = type(exc).__name__
+                logger.warning("Job %s (%s) failed: %s", job.pk, job.name, job.error)
             else:
                 job.status = Job.DONE
             job.attempts += 1
