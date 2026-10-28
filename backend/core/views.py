@@ -1,5 +1,6 @@
 from django.db import connection
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import render
 
 
 def health(request):
@@ -7,3 +8,9 @@ def health(request):
         cursor.execute("SELECT 1")
         cursor.fetchone()
     return JsonResponse({"status": "ok", "database": "ok"})
+
+
+def home(request):
+    if not request.user.is_authenticated:
+        return HttpResponse(status=401)
+    return render(request, "home.html")

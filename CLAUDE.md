@@ -2,7 +2,7 @@
 
 ## Project state
 
-Pilot platform, two portals. Malaysian clients issue LHDN MyInvois e-invoices and upload bookkeeping documents; the accounting firm reviews them and exports a monthly batch to SQL Account. Greenfield: no application code yet.
+Pilot platform, two portals. Malaysian clients issue LHDN MyInvois e-invoices and upload bookkeeping documents; the accounting firm reviews them and exports a monthly batch to SQL Account. Early build: ticket 01 (#2) foundation is in progress; most features do not exist yet.
 
 ## Source of truth 
 
@@ -16,7 +16,10 @@ Commands (run from `backend/`; `DATABASE_URL` must be set, there is no default b
 - Check the project: `python manage.py check`
 - All tests: `pytest`
 - One test: `pytest core/tests/test_health.py::test_health_page_reports_app_and_database_up`
-- CI runs `check` and `pytest` against a Postgres 16 service.
+- Tests run inside the stack too: `docker compose exec backend pytest`.
+- Translations: edit `backend/locale/zh_Hans/LC_MESSAGES/django.po`, then run `python manage.py compilemessages` (needs gettext). The compiled `.mo` files are committed, so recompile before committing.
+- External services are reached only through `core.ports.get()`; tests get fakes from the autouse `fake_ports` fixture. Queued work runs in tests with `core.jobs.run_pending()`.
+- CI runs `check`, a migration drift check and `pytest` against a Postgres 16 service.
 
 ## Workflow
 
