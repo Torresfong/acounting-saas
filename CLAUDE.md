@@ -10,10 +10,6 @@ docs/product/pilot-spec.md: user stories, decisions, out of scope.
 docs/architecture/Decision/pilot-decisions.md: decisions D1 to D35. Cite the number you rely on. If a ticket or instruction contradicts one, stop and flag it; never override silently.
 Issue #1 is the parent; #2 to #24 are its tickets. Ticket "NN" = issue #(NN+1).
 
-## Scaffold contradicts the decisions
-
-Resolved on branch `ticket-01-project-foundation`: the FastAPI and Nuxt scaffold is replaced by a Django project (D10) under `backend/`, with no separate `frontend/` folder. Server-rendered pages use HTMX and Alpine.js. Ticket 01 (#2) is not finished: the four fake ports, the English and Chinese translation proof and the in-process job runner are still to do.
-
 Commands (run from `backend/`; `DATABASE_URL` must be set, there is no default because Postgres is required):
 
 - Run everything: `docker compose up --build` from the repo root (copy `.env.example` to `.env` first).
