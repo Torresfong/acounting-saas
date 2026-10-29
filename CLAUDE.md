@@ -8,6 +8,7 @@ Pilot platform, two portals. Malaysian clients issue LHDN MyInvois e-invoices an
 
 docs/product/pilot-spec.md: user stories, decisions, out of scope.
 docs/architecture/Decision/pilot-decisions.md: decisions D1 to D37. Cite the number you rely on. If a ticket or instruction contradicts one, stop and flag it; never override silently.
+docs/architecture/architecture.md and data-flow.md: system structure and data flows as Mermaid diagrams, with built versus planned marked. Update them in the same PR when a ticket changes a structure or flow they show.
 Issue #1 is the parent; #2 to #24 are its tickets. Ticket "NN" = issue #(NN+1).
 
 Commands (run from `backend/`; `DATABASE_URL` must be set, there is no default because Postgres is required):
