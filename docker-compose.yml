@@ -27,16 +27,5 @@ services:
       db:
         condition: service_healthy
 
-  frontend:
-    build: ./frontend
-    env_file: .env
-    ports:
-      - "${FRONTEND_PORT}:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      - backend
-
 volumes:
   db_data:
