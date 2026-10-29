@@ -7,7 +7,7 @@ Pilot platform, two portals. Malaysian clients issue LHDN MyInvois e-invoices an
 ## Source of truth 
 
 docs/product/pilot-spec.md: user stories, decisions, out of scope.
-docs/architecture/Decision/pilot-decisions.md: decisions D1 to D35. Cite the number you rely on. If a ticket or instruction contradicts one, stop and flag it; never override silently.
+docs/architecture/Decision/pilot-decisions.md: decisions D1 to D37. Cite the number you rely on. If a ticket or instruction contradicts one, stop and flag it; never override silently.
 Issue #1 is the parent; #2 to #24 are its tickets. Ticket "NN" = issue #(NN+1).
 
 Commands (run from `backend/`; `DATABASE_URL` must be set, there is no default because Postgres is required):
@@ -19,13 +19,13 @@ Commands (run from `backend/`; `DATABASE_URL` must be set, there is no default b
 - Tests run inside the stack too: `docker compose exec backend pytest`.
 - Translations: edit `backend/locale/zh_Hans/LC_MESSAGES/django.po`, then run `python manage.py compilemessages` (needs gettext). The compiled `.mo` files are committed, so recompile before committing.
 - External services are reached only through `core.ports.get()`; tests get fakes from the autouse `fake_ports` fixture. Queued work runs in tests with `core.jobs.run_pending()`.
-- CI runs `check`, a migration drift check and `pytest` against a Postgres 16 service.
+- CI runs `check`, a migration drift check and `pytest` against a Postgres 16 service (job `backend`), and builds the Docker image (job `image`). Both are required to merge.
 
 ## Workflow
 
 1. Pick: gh issue list --repo Torresfong/acounting-saas --state open --label ready-for-agent. Take a ticket only if it has no open blockers: gh api repos/Torresfong/acounting-saas/issues/<n> --jq .issue_dependencies_summary (native dependencies, not body text). Never pick #19 or #23 without asking.
 2. Read: the ticket, every decision it cites, and the matching spec section.
-3. Branch: ticket-NN-<slug> from main. Never push to main.
+3. Branch: ticket-NN-<slug> from main. Never push to main: it is protected (D37), so changes arrive by pull request with the `backend` and `image` checks passing, and the rule applies to admins too.
 4. Test first: write a failing test at the right seam (below), then the code.
 5. Missing external input (sandbox credentials, certificate, samples, cloud account): build against the fake port and say so in the PR.
 6. Verify: run the full test suite; each acceptance-criteria checkbox must be met and evidenced.
@@ -37,6 +37,7 @@ Stop and ask when: a decision conflicts; scope would change; a migration alters 
 ## Hard rules
 - External services only through the four ports (MyInvois, AI provider, email, object storage), each a single module with a test fake. Swapping an implementation must not touch callers.
 - Tenancy: every business table has a company id; Postgres RLS enforces isolation from the first migration. Never rely on application filtering alone.
+- Jobs (D36, ADR 0001): job rows carry a company id under RLS and are claimed by a separate worker role, which sets the company context from that column, never from the payload (the column, policy and roles arrive with ticket 02, #3; until then no handler may touch tenant data). Payloads hold identifiers only, enforced by `enqueue()`. A failed job keeps only the exception class, and handlers must not log content.
 - Roles: client owner, client staff, firm accountant. Only the owner approves and submits; no delegation.
 - Invoices: gapless numbering per company and document type. Approval copies and locks buyer details. After go-live the platform is the client's only issuer.
 - Document states: uploaded → quality-checked → classified → extracted → in review → verified → exported (plus returned, rejected). Only verified documents export. Exported documents lock; corrections go to the next batch flagged "changed after export".
