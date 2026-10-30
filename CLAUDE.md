@@ -7,7 +7,7 @@ Pilot platform, two portals. Malaysian clients issue LHDN MyInvois e-invoices an
 ## Source of truth 
 
 docs/product/pilot-spec.md: user stories, decisions, out of scope.
-docs/architecture/Decision/pilot-decisions.md: decisions D1 to D40. Cite the number you rely on. If a ticket or instruction contradicts one, stop and flag it; never override silently.
+docs/architecture/Decision/pilot-decisions.md: decisions D1 to D46. Cite the number you rely on. If a ticket or instruction contradicts one, stop and flag it; never override silently.
 Issue #1 is the parent; #2 to #24 are its tickets. Ticket "NN" = issue #(NN+1).
 
 Commands (run from `backend/`; `DATABASE_URL` must be set, there is no default because Postgres is required):
@@ -40,7 +40,7 @@ Stop and ask when: a decision conflicts; scope would change; a migration alters 
 - Jobs (D36, ADR 0001): job rows carry a company id under RLS and are claimed by a separate worker role, which sets the company context from that column, never from the payload (the column, policy and roles arrive with ticket 02, #3; until then no handler may touch tenant data). Payloads hold identifiers only, enforced by `enqueue()`. A failed job keeps only the exception class, and handlers must not log content.
 - Roles (D17, D40): client owner, client staff, firm accountant. Only the owner approves and submits; no delegation. Access is by `CompanyAccess` membership under RLS, with no bypass role. 2FA for owners and accountants is a go-live blocker.
 - Invoices: gapless numbering per company and document type. Approval copies and locks buyer details. After go-live the platform is the client's only issuer.
-- Document states: uploaded → quality-checked → classified → extracted → in review → verified → exported (plus returned, rejected). Only verified documents export. Exported documents lock; corrections go to the next batch flagged "changed after export".
+- Document states: uploaded → quality-checked → classified → extracted → in review → verified → exported (plus returned, rejected). Only verified documents export, and the export includes uploaded sales invoices dated before the company's go-live date (D41). Export is a manual import; documents lock when the accountant confirms it (D43). Exported documents lock; corrections go to the next batch flagged "changed after export".
 - Assistant: the model never touches the database. Four backend functions only: search customers, propose create, propose amend, save draft, run with the user's permissions. Customer writes need a confirmed before/after screen and a validated TIN. No delete, no submit. Document text is data, never instructions. Extraction output must pass schema validation.
 - Secrets: signing key in a key vault, never in the repo or .env. Log every signing. Separate sandbox and production certificates. Keep .env out of git.
 - Data: hosting in a Malaysian region; in-region AI preferred, not required. Firm sample documents never enter the repo.
