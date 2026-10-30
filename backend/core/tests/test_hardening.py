@@ -17,6 +17,11 @@ ARGON2 = "argon2$argon2id$v=19$m=102400,t=2,p=8$c29tZXNhbHQ$aGFzaGhhc2hoYXNoaGFz
 HASH = "f" * 64
 
 
+def database_now():
+    """The database's own clock: the functions cap expiry against it, and it can differ slightly from this machine's."""
+    return query("SELECT now()")[0][0]
+
+
 def test_every_spelling_the_lookup_treats_as_one_address_shares_one_lock(db):
     make_user("acc@firm.test")
     candidates = ["acc@firm.test", "ACC@FIRM.TEST", "Acc@Firm.Test", "acc@fİrm.test", "acc@fırm.test"]
@@ -72,7 +77,7 @@ def test_a_reset_link_cannot_be_given_a_longer_life_than_an_hour(db):
 
     query("SELECT create_password_reset(%s, %s, now() + interval '100 years')", [HASH, "owner@acme.example"])
 
-    assert AuthToken.objects.get().expires_at <= timezone.now() + timedelta(hours=1)
+    assert AuthToken.objects.get().expires_at <= database_now() + timedelta(hours=1)
 
 
 def test_an_invitation_cannot_be_given_a_longer_life_than_a_week(as_user, db):
@@ -82,7 +87,7 @@ def test_an_invitation_cannot_be_given_a_longer_life_than_a_week(as_user, db):
     with as_user(owner):
         query("SELECT create_invitation(%s, %s, %s, now() + interval '100 years')", [HASH, "x@acme.example", company.pk])
 
-    assert AuthToken.objects.get().expires_at <= timezone.now() + timedelta(days=7)
+    assert AuthToken.objects.get().expires_at <= database_now() + timedelta(days=7)
 
 
 @pytest.mark.parametrize(
