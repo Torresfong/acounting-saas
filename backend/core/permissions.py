@@ -17,6 +17,8 @@ OWNER, STAFF, ACCOUNTANT = CompanyAccess.OWNER, CompanyAccess.STAFF, CompanyAcce
 ACTIONS = {
     "view_company": {OWNER, STAFF, ACCOUNTANT},
     "invite_staff": {OWNER},
+    "view_audit_trail": {OWNER, ACCOUNTANT},
+    "view_own_activity": {OWNER, STAFF, ACCOUNTANT},
 }
 
 

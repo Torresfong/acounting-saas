@@ -10,6 +10,11 @@
   <p>{% blocktrans with role=access.get_role_display %}Your role: {{ role }}{% endblocktrans %}</p>
   {% if message %}<p role="status">{{ message }}</p>{% endif %}
   {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+  {% can "view_audit_trail" company as may_audit %}
+  <ul>
+    {% if may_audit %}<li><a href="/companies/{{ company.pk }}/audit/">{% trans "Audit trail" %}</a></li>{% endif %}
+    <li><a href="/companies/{{ company.pk }}/activity/">{% trans "My activity" %}</a></li>
+  </ul>
   {% can "invite_staff" company as may_invite %}
   {% if may_invite %}
     <h2>{% trans "Invite a colleague" %}</h2>

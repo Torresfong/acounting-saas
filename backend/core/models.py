@@ -1,6 +1,6 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
-from django.db.models.functions import Lower
+from django.db.models.functions import Lower, Now
 from django.utils.translation import gettext_lazy as _
 
 
@@ -141,3 +141,41 @@ class AuthToken(models.Model):
     expires_at = models.DateTimeField()
     used_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AuditEntry(models.Model):
+    """One line of the audit trail: who did what, to which record, when (D40 (6)).
+
+    Append-only: the web role can insert and read but not change or delete, and a trigger refuses updates
+    and deletes from anyone else. An update records the names of the fields that changed, never their
+    values, so an entry cannot hold a credential, a token or a customer's details.
+    """
+
+    LOGIN = "login"
+    LOGIN_FAILED = "login_failed"
+    LOGOUT = "logout"
+    CREATE = "create"
+    UPDATE = "update"
+    DELETE = "delete"
+    ACTIONS = [
+        (LOGIN, _("Signed in")),
+        (LOGIN_FAILED, _("Failed sign-in")),
+        (LOGOUT, _("Signed out")),
+        (CREATE, _("Created")),
+        (UPDATE, _("Updated")),
+        (DELETE, _("Deleted")),
+    ]
+
+    company = models.ForeignKey(Company, null=True, on_delete=models.PROTECT, related_name="+")
+    # A plain number and a copy of the address, not a foreign key: the entry must outlive any change to the account.
+    actor_id = models.BigIntegerField(null=True, blank=True)
+    actor_email = models.CharField(max_length=254, blank=True)
+    action = models.CharField(max_length=20, choices=ACTIONS)
+    target_type = models.CharField(max_length=100, blank=True)
+    target_id = models.CharField(max_length=40, blank=True)
+    changed_fields = models.JSONField(default=list)
+    occurred_at = models.DateTimeField(db_default=Now())
+
+    class Meta:
+        indexes = [models.Index(fields=["company", "-occurred_at"], name="audit_company_time")]
+        ordering = ["-occurred_at", "-id"]

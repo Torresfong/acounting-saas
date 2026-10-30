@@ -100,3 +100,27 @@ What limits this: expiry is capped and only an Argon2 hash is accepted, so a jun
 - **Two-factor authentication is not built now.** It is done before go-live (D40 (7)). Its absence does not block PR #68.
 - **A session security review is a go-live security requirement:** the session store the web role can read and write, session key handling (for example hashed keys or signed cookies), lifetime and idle timeout, and invalidation on password change and on sign-out everywhere.
 - **Migration 0003 was edited after it merged.** Django records only a migration's name, not its content, so an environment that applied the earlier version stays consistent and does not re-run it; it simply does not get the added role check. Verified by migrating a database with the earlier 0003 and then applying this branch: it upgrades without error and `makemigrations --check` is clean.
+
+## Audit trail (02c, #33)
+
+Implements D40 (6). Entries are in `core_auditentry`: company, who (account id and a copy of the address), what, which record, which fields changed, and when.
+
+**What is recorded.** Every insert, update and delete on a business table, written by a trigger; successful and failed sign-ins and sign-outs; and domain events that are not a row change (an approval, a submission) through `core.audit.record`. Nothing else: the audit trail of the assistant, signings and exports belong to their own tickets.
+
+**Adding a business table to the trail.** In the migration that creates the table, after `enable_tenant_rls`, add `core.audit.enable_audit("app_table")`. The table needs `id` and `company_id`. The trigger runs with the rights of whoever makes the change, so the signed-in user writes their own entry under the same row-level security as any other insert, and a change to a company the user cannot reach is refused. A change made with no signed-in user (an operator command, a job) is recorded with no actor. An update that changes nothing records nothing.
+
+**What is never stored.** Only the *names* of changed fields, never their values, so an entry cannot hold a password, a token, a TIN or an amount. `core.audit.record` must not be given content either.
+
+**Sign-in events.** One entry for each company the account belongs to, written by the `record_auth_event` definer function because nobody is identified at a failed sign-in. An accountant's sign-in therefore appears in every company's trail. Not recorded: attempts for an address with no account (there is nothing to attach them to, and they would let anyone grow the table) and attempts refused by the lock (they do not test a password). Both still count towards the throttle.
+
+**Append-only.** The web role has `SELECT` and `INSERT` only. A trigger also refuses `UPDATE` and `DELETE` from every other role, the table owner included. `TRUNCATE` is not trapped: the web role has no right to it, and Django's test runner needs it. There is no page that changes an entry. Retention and export (7 years, D-retention) will need a controlled path for the operator; it does not exist yet.
+
+**Who may read.** Company isolation is row-level security (the standard company rule, for reads and inserts). Which entries a role may see is the permission service: the owner and the firm's accountants read the company's full trail at `/companies/<id>/audit/`; staff are refused it with a 403 and read only their own activity at `/companies/<id>/activity/`, which every role can open for themself. A company the user cannot reach is a 404.
+
+**Written only as the caller.** The web role's insert policy requires the actor to be the signed-in user and the address to be theirs, so an entry cannot be written in someone else's name, and a database trigger sets the time, so an entry cannot be back-dated. A signed-in user may record only their own sign-in events through `record_auth_event`; the sign-in page therefore sends someone who is already signed in home, and a different account needs a sign-out first. A row moved to another company leaves an entry in both companies. `enable_audit` refuses a table without `id` and `company_id`, because the trigger would otherwise fail on the first write and block it.
+
+**Limits.**
+- Staff reading only their own activity is the permission service. Row-level security gives any web session the company's entries, so an attacker with SQL as `web` in a staff session can read the whole company trail, which is also true of every other tenant table (D40 (3)). Entries already written cannot be changed or removed by `web`.
+- An attacker with SQL as `web` can still add entries of their own for the companies they reach, as themselves, and `record_auth_event` can be called without a session for any address; the sign-in page is limited per address only, so entries for one account can be created at that rate. The trail shows the newest 200 entries and has no paging, so a flood could push older ones off the page; paging and search are not built.
+- A write by a role that has no right to `core_auditentry` fails and blocks the business write. The job worker role of ticket 02d (#34) needs an insert grant and a policy; until then only the owner role (no actor recorded) and signed-in web sessions can write audited tables.
+- D45 says every read of a company's data by a firm accountant goes to the audit trail. Reads are not recorded here: no company-data screens exist yet, and the criteria of #33 do not include it. It needs a decision on how reads are recorded (a helper each screen calls, or a middleware) when the first such screen is built.
