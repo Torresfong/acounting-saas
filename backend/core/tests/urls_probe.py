@@ -25,4 +25,9 @@ def probe(request):
     )
 
 
-urlpatterns = [path("probe/", probe)]
+def boom(request):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT 1 / 0")
+
+
+urlpatterns = [path("probe/", probe), path("boom/", boom)]

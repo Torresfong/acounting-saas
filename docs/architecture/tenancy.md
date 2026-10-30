@@ -1,6 +1,6 @@
 # Tenancy and row-level security
 
-Implements D11 and D40 (1) to (4). Built in ticket 02a (#31). Job-queue tenancy (D36) arrives in 02d (#34), and users and sign-in in 02b (#32).
+Implements D11 and D40 (1), (2) for `CompanyAccess`, (3) and (4). Built in ticket 02a (#31). Still to come: the policy on user records and the pre-authentication lookup function (D40 (2)) in 02b (#32), and job-queue tenancy (D36) in 02d (#34).
 
 ## How isolation works
 
@@ -17,18 +17,19 @@ Implements D11 and D40 (1) to (4). Built in ticket 02a (#31). Job-queue tenancy 
 2. In the migration that creates the table, add `core.rls.enable_tenant_rls("app_table")` straight after the `CreateModel`. It grants the web role access to that table and applies the policy.
 3. Use `GENERATED ... AS IDENTITY` ids, which Django's `BigAutoField` already does. A separate sequence would need its own grant to the web role.
 
-There are deliberately no default privileges: a table added without step 2 is unreachable by the web role, so forgetting the policy fails closed. A schema test also fails if the web role can use a table that is neither under row-level security nor on a short reviewed list.
+The web role starts with access to nothing and there are no default privileges, so a table added without step 2 is unreachable by it and forgetting the policy fails closed. Users, jobs, sessions and Django's own tables are closed to the web role for now; the ticket that puts each under a policy opens it (02b for users, 02d for jobs). A schema test fails if the web role can use any table that is not under forced row-level security.
 
 ## Roles and deployment
 
 - Migrations create the `web` role without a login. They must run as the table owner, never as `web`.
 - For production, the application should connect with a login role that is a member of `web` and owns nothing (`CREATE ROLE app LOGIN PASSWORD ... IN ROLE web`), while migrations run with the owner's credentials. The middleware also drops to `web` on every request, so a connection made with the owner's credentials (as in development and tests) still cannot skip row-level security while handling a request.
 - The user and session lookup that happens before the middleware runs as the connection's own role. Ticket 02b gives the user table its own policy and a narrow pre-authentication lookup function.
-- The job queue and the Django user tables are not yet under tenant policies; 02d and 02b address them.
+- The web role cannot read the user, job or session tables yet, so a request cannot touch them until 02b and 02d open them with policies.
+- A streaming response is read after the middleware returns, outside the web role and its transaction. Do not query tenant data lazily inside a streamed response.
 
 ## Threat model and limits
 
-- **The identity is a mutable session setting.** Any code running as `web` can execute `SELECT set_config('app.user_id', ...)` or `RESET ROLE`. Row-level security therefore protects against mistakes (a missing filter, a wrong query) and not against an attacker who can run arbitrary SQL as `web`.
+- **The identity is a mutable session setting, and the role switch can be undone.** Any code running as `web` can execute `SELECT set_config('app.user_id', ...)` and so impersonate another user. If the connection was made with the owner's or a superuser's credentials, it can also run `RESET ROLE` and leave row-level security altogether. In production the connection must therefore be made as a login role that is a member of `web` and nothing else, so there is no stronger role to go back to; in development and tests the connection is the owner's and only the per-request switch protects tenant data. Row-level security protects against mistakes (a missing filter, a wrong query) and not against an attacker who can run arbitrary SQL as `web`.
 - **SQL injection is the main threat to this design.** An injected statement could impersonate another user. Defences: parameterized queries and the ORM only, no string-built SQL, no raw SQL that includes request data, review of any `.raw()` or `cursor.execute()` use. Row-level security backs these up; it does not replace them.
 - **Transaction-local only.** The setting and role are applied with `SET LOCAL` inside the request's transaction and reset explicitly at the end, so they cannot leak to the next request on a pooled connection. Code must not start work on the connection outside that transaction and expect the identity to apply.
 - **Superusers bypass row-level security.** Nothing on a request path may connect as one. Development and test connections use a superuser but switch to `web` before touching tenant data.

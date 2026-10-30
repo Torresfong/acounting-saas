@@ -17,9 +17,9 @@ IDENTITY_FUNCTION = "app_user_id"
 _ACCESSIBLE_COMPANIES = f"SELECT company_id FROM core_companyaccess WHERE user_id = {IDENTITY_FUNCTION}()"
 
 
-def tenant_policy_sql(table, column="company_id"):
+def tenant_policy_sql(table):
     """SQL that puts `table` under the standard isolation policy."""
-    check = f"{column} IN ({_ACCESSIBLE_COMPANIES})"
+    check = f"company_id IN ({_ACCESSIBLE_COMPANIES})"
     return [
         f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {WEB_ROLE}",
         f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY",
@@ -37,6 +37,6 @@ def drop_tenant_policy_sql(table):
     ]
 
 
-def enable_tenant_rls(table, column="company_id"):
+def enable_tenant_rls(table):
     """A migration operation that applies the standard isolation policy to `table`."""
-    return migrations.RunSQL(tenant_policy_sql(table, column), drop_tenant_policy_sql(table))
+    return migrations.RunSQL(tenant_policy_sql(table), drop_tenant_policy_sql(table))

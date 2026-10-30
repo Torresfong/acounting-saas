@@ -1,6 +1,10 @@
+from contextlib import contextmanager
+
 import pytest
+from django.db import connection
 
 from core import ports
+from core.rls import IDENTITY_SETTING, WEB_ROLE
 from core.ports.fakes import FakePorts
 
 
@@ -21,20 +25,16 @@ def as_user(db):
     the policies can be tested without a request. Fixtures are created before entering the block, as the
     table owner, because the web role cannot write to the membership tables.
     """
-    from contextlib import contextmanager
-
-    from django.db import connection
-
     @contextmanager
     def switch(user):
         with connection.cursor() as cursor:
-            cursor.execute("SET ROLE web")
-            cursor.execute("SELECT set_config('app.user_id', %s, false)", [str(user.pk)])
+            cursor.execute(f"SET ROLE {WEB_ROLE}")
+            cursor.execute("SELECT set_config(%s, %s, false)", [IDENTITY_SETTING, str(user.pk)])
         try:
             yield
         finally:
             with connection.cursor() as cursor:
                 cursor.execute("RESET ROLE")
-                cursor.execute("SELECT set_config('app.user_id', '', false)")
+                cursor.execute("SELECT set_config(%s, '', false)", [IDENTITY_SETTING])
 
     return switch

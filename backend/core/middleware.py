@@ -11,11 +11,13 @@ class TenantContextMiddleware:
     nothing carries over to the next request on a pooled connection. Anonymous requests get an empty
     identity, which matches no company. Place it after AuthenticationMiddleware.
 
-    The cleanup in `finally` matters when the request is already inside an outer transaction (tests):
-    a savepoint release does not undo SET LOCAL, so the role and identity are reset explicitly.
+    When the request is already inside an outer transaction (tests), releasing the request's savepoint
+    does not undo SET LOCAL, so the role and identity are reset explicitly on the normal path. If the
+    request fails, the rollback undoes them, and running more SQL in the failed transaction would only
+    hide the original error.
 
     Limits are documented in docs/architecture/tenancy.md: the web role can still change its own setting,
-    so this backs up parameterized ORM access and does not replace it.
+    and a streaming response is read after this middleware returns, outside the role.
     """
 
     def __init__(self, get_response):
@@ -29,9 +31,9 @@ class TenantContextMiddleware:
             with connection.cursor() as cursor:
                 cursor.execute(f"SET LOCAL ROLE {WEB_ROLE}")
                 cursor.execute("SELECT set_config(%s, %s, true)", [IDENTITY_SETTING, user_id])
-            try:
-                return self.get_response(request)
-            finally:
+            response = self.get_response(request)
+            if not connection.needs_rollback:
                 with connection.cursor() as cursor:
                     cursor.execute("RESET ROLE")
                     cursor.execute("SELECT set_config(%s, '', true)", [IDENTITY_SETTING])
+            return response

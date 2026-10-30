@@ -1,7 +1,10 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError, connection, transaction
+from django.db.utils import DataError
 
 from core.models import Company, CompanyAccess
+from core.rls import IDENTITY_SETTING, WEB_ROLE, tenant_policy_sql
 
 
 @pytest.fixture
@@ -15,10 +18,16 @@ def make_user(name):
     return get_user_model().objects.create_user(name, password="unused")
 
 
+def member(name, company, role):
+    """A new user with a membership row in `company`."""
+    user = make_user(name)
+    CompanyAccess.objects.create(user=user, company=company, role=role)
+    return user
+
+
 def test_a_user_sees_only_the_companies_they_have_access_to(as_user, two_companies):
     acme, _ = two_companies
-    owner = make_user("acme-owner")
-    CompanyAccess.objects.create(user=owner, company=acme, role=CompanyAccess.OWNER)
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
 
     with as_user(owner):
         assert list(Company.objects.values_list("name", flat=True)) == ["Acme Sdn Bhd"]
@@ -27,8 +36,7 @@ def test_a_user_sees_only_the_companies_they_have_access_to(as_user, two_compani
 def test_a_user_with_several_memberships_sees_exactly_those_companies(as_user, two_companies):
     acme, beta = two_companies
     gamma = Company.objects.create(name="Gamma Holdings")
-    accountant = make_user("firm-accountant")
-    CompanyAccess.objects.create(user=accountant, company=acme, role=CompanyAccess.ACCOUNTANT)
+    accountant = member("firm-accountant", acme, CompanyAccess.ACCOUNTANT)
     CompanyAccess.objects.create(user=accountant, company=beta, role=CompanyAccess.ACCOUNTANT)
 
     with as_user(accountant):
@@ -41,7 +49,7 @@ def test_a_user_with_several_memberships_sees_exactly_those_companies(as_user, t
 def test_a_user_with_no_membership_sees_no_company_and_no_membership_rows(as_user, two_companies):
     acme, _ = two_companies
     outsider = make_user("outsider")
-    CompanyAccess.objects.create(user=make_user("acme-owner"), company=acme, role=CompanyAccess.OWNER)
+    member("acme-owner", acme, CompanyAccess.OWNER)
 
     with as_user(outsider):
         assert Company.objects.count() == 0
@@ -50,22 +58,18 @@ def test_a_user_with_no_membership_sees_no_company_and_no_membership_rows(as_use
 
 def test_a_user_sees_only_their_own_membership_rows(as_user, two_companies):
     acme, _ = two_companies
-    owner = make_user("acme-owner")
-    staff = make_user("acme-staff")
-    CompanyAccess.objects.create(user=owner, company=acme, role=CompanyAccess.OWNER)
-    CompanyAccess.objects.create(user=staff, company=acme, role=CompanyAccess.STAFF)
+    member("acme-owner", acme, CompanyAccess.OWNER)
+    staff = member("acme-staff", acme, CompanyAccess.STAFF)
 
     with as_user(staff):
-        rows = list(CompanyAccess.objects.values_list("user__username", "role"))
+        rows = list(CompanyAccess.objects.values_list("user_id", "role"))
 
-    assert rows == [("acme-staff", "staff")]
+    assert rows == [(staff.pk, "staff")]
 
 
 def test_with_no_signed_in_identity_the_web_role_sees_nothing(db, two_companies):
-    from django.db import connection
-
     with connection.cursor() as cursor:
-        cursor.execute("SET ROLE web")
+        cursor.execute(f"SET ROLE {WEB_ROLE}")
         try:
             cursor.execute("SELECT count(*) FROM core_company")
             assert cursor.fetchone()[0] == 0
@@ -74,11 +78,8 @@ def test_with_no_signed_in_identity_the_web_role_sees_nothing(db, two_companies)
 
 
 def test_the_web_role_cannot_change_companies_or_memberships(as_user, two_companies):
-    from django.db import DatabaseError, transaction
-
     acme, _ = two_companies
-    owner = make_user("acme-owner")
-    CompanyAccess.objects.create(user=owner, company=acme, role=CompanyAccess.OWNER)
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
 
     with as_user(owner):
         with pytest.raises(DatabaseError), transaction.atomic():
@@ -88,12 +89,8 @@ def test_the_web_role_cannot_change_companies_or_memberships(as_user, two_compan
 
 
 @pytest.fixture
-def probe_notes(db, two_companies):
+def notes_table(db, two_companies):
     """A tenant table built with the standard helper, standing in for the business tables later tickets add."""
-    from django.db import connection
-
-    from core.rls import tenant_policy_sql
-
     acme, beta = two_companies
     with connection.cursor() as cursor:
         cursor.execute(
@@ -109,84 +106,72 @@ def probe_notes(db, two_companies):
     return acme, beta
 
 
-def run(sql, params=()):
-    from django.db import connection
-
+def query(sql, params=()):
     with connection.cursor() as cursor:
         cursor.execute(sql, params)
         return cursor.fetchall() if cursor.description else cursor.rowcount
 
 
-def test_a_tenant_table_shows_a_user_only_their_companies_rows(as_user, probe_notes):
-    acme, _ = probe_notes
-    owner = make_user("acme-owner")
-    CompanyAccess.objects.create(user=owner, company=acme, role=CompanyAccess.OWNER)
+def test_a_tenant_table_shows_a_user_only_their_companies_rows(as_user, notes_table):
+    acme, _ = notes_table
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
 
     with as_user(owner):
-        assert run("SELECT body FROM probe_note ORDER BY id") == [("acme note",)]
+        assert query("SELECT body FROM probe_note ORDER BY id") == [("acme note",)]
 
 
-def test_a_tenant_table_refuses_to_insert_a_row_for_another_company(as_user, probe_notes):
-    from django.db import DatabaseError, transaction
-
-    acme, beta = probe_notes
-    owner = make_user("acme-owner")
-    CompanyAccess.objects.create(user=owner, company=acme, role=CompanyAccess.OWNER)
+def test_a_tenant_table_refuses_to_insert_a_row_for_another_company(as_user, notes_table):
+    acme, beta = notes_table
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
 
     with as_user(owner):
-        run("INSERT INTO probe_note (company_id, body) VALUES (%s, 'mine')", [acme.pk])
+        query("INSERT INTO probe_note (company_id, body) VALUES (%s, 'mine')", [acme.pk])
         with pytest.raises(DatabaseError), transaction.atomic():
-            run("INSERT INTO probe_note (company_id, body) VALUES (%s, 'planted')", [beta.pk])
+            query("INSERT INTO probe_note (company_id, body) VALUES (%s, 'planted')", [beta.pk])
 
 
-def test_a_tenant_table_refuses_to_move_a_row_to_another_company(as_user, probe_notes):
-    from django.db import DatabaseError, transaction
-
-    acme, beta = probe_notes
-    owner = make_user("acme-owner")
-    CompanyAccess.objects.create(user=owner, company=acme, role=CompanyAccess.OWNER)
+def test_a_tenant_table_refuses_to_move_a_row_to_another_company(as_user, notes_table):
+    acme, beta = notes_table
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
 
     with as_user(owner):
         with pytest.raises(DatabaseError), transaction.atomic():
-            run("UPDATE probe_note SET company_id = %s WHERE company_id = %s", [beta.pk, acme.pk])
+            query("UPDATE probe_note SET company_id = %s WHERE company_id = %s", [beta.pk, acme.pk])
 
 
-def test_a_tenant_table_cannot_update_or_delete_another_companys_rows(as_user, probe_notes):
-    acme, beta = probe_notes
-    owner = make_user("acme-owner")
-    CompanyAccess.objects.create(user=owner, company=acme, role=CompanyAccess.OWNER)
+def test_a_tenant_table_cannot_update_or_delete_another_companys_rows(as_user, notes_table):
+    acme, beta = notes_table
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
 
     with as_user(owner):
-        assert run("UPDATE probe_note SET body = 'changed' WHERE company_id = %s", [beta.pk]) == 0
-        assert run("DELETE FROM probe_note WHERE company_id = %s", [beta.pk]) == 0
+        assert query("UPDATE probe_note SET body = 'changed' WHERE company_id = %s", [beta.pk]) == 0
+        assert query("DELETE FROM probe_note WHERE company_id = %s", [beta.pk]) == 0
 
-    assert run("SELECT body FROM probe_note WHERE company_id = %s", [beta.pk]) == [("beta note",)]
+    assert query("SELECT body FROM probe_note WHERE company_id = %s", [beta.pk]) == [("beta note",)]
 
 
-def test_a_user_with_two_memberships_works_in_both_companies_and_no_other(as_user, probe_notes):
-    acme, beta = probe_notes
+def test_a_user_with_two_memberships_works_in_both_companies_and_no_other(as_user, notes_table):
+    acme, beta = notes_table
     gamma = Company.objects.create(name="Gamma Holdings")
-    accountant = make_user("firm-accountant")
-    CompanyAccess.objects.create(user=accountant, company=acme, role=CompanyAccess.ACCOUNTANT)
+    accountant = member("firm-accountant", acme, CompanyAccess.ACCOUNTANT)
     CompanyAccess.objects.create(user=accountant, company=beta, role=CompanyAccess.ACCOUNTANT)
 
     with as_user(accountant):
-        assert run("SELECT body FROM probe_note ORDER BY id") == [("acme note",), ("beta note",)]
-        run("INSERT INTO probe_note (company_id, body) VALUES (%s, 'from firm')", [beta.pk])
+        assert query("SELECT body FROM probe_note ORDER BY id") == [("acme note",), ("beta note",)]
+        query("INSERT INTO probe_note (company_id, body) VALUES (%s, 'from firm')", [beta.pk])
 
-    assert run("SELECT count(*) FROM probe_note WHERE company_id = %s", [gamma.pk]) == [(0,)]
+    assert query("SELECT count(*) FROM probe_note WHERE company_id = %s", [gamma.pk]) == [(0,)]
 
 
 @pytest.fixture
-def probe_client(client, settings):
+def probe_client(db, client, settings):
     settings.ROOT_URLCONF = "core.tests.urls_probe"
     return client
 
 
 def test_a_request_runs_as_a_database_role_that_cannot_skip_row_level_security(probe_client, two_companies):
     acme, _ = two_companies
-    owner = make_user("acme-owner")
-    CompanyAccess.objects.create(user=owner, company=acme, role=CompanyAccess.OWNER)
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
     probe_client.force_login(owner)
 
     body = probe_client.get("/probe/").json()
@@ -198,10 +183,8 @@ def test_a_request_runs_as_a_database_role_that_cannot_skip_row_level_security(p
 
 def test_a_signed_in_request_sees_only_its_users_companies(probe_client, two_companies):
     acme, beta = two_companies
-    owner = make_user("acme-owner")
-    CompanyAccess.objects.create(user=owner, company=acme, role=CompanyAccess.OWNER)
-    other = make_user("beta-owner")
-    CompanyAccess.objects.create(user=other, company=beta, role=CompanyAccess.OWNER)
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
+    other = member("beta-owner", beta, CompanyAccess.OWNER)
 
     probe_client.force_login(owner)
     assert probe_client.get("/probe/").json()["companies"] == ["Acme Sdn Bhd"]
@@ -219,14 +202,20 @@ def test_an_anonymous_request_sees_no_company(probe_client, two_companies):
 
 def test_the_identity_and_role_do_not_outlive_the_request(probe_client, two_companies):
     acme, _ = two_companies
-    owner = make_user("acme-owner")
-    CompanyAccess.objects.create(user=owner, company=acme, role=CompanyAccess.OWNER)
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
     probe_client.force_login(owner)
 
     probe_client.get("/probe/")
 
-    assert run("SELECT current_user = session_user") == [(True,)]
-    assert run("SELECT coalesce(current_setting('app.user_id', true), '')") == [("",)]
+    assert query("SELECT current_user = session_user") == [(True,)]
+    assert query("SELECT coalesce(current_setting(%s, true), '')", [IDENTITY_SETTING]) == [("",)]
+
+
+def test_a_database_error_in_a_view_reaches_the_caller_unchanged_and_the_role_is_undone(probe_client):
+    with pytest.raises(DataError):
+        probe_client.get("/boom/")
+
+    assert query("SELECT current_user = session_user") == [(True,)]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -238,34 +227,20 @@ def test_in_a_real_transaction_the_role_and_identity_are_gone_after_the_request(
 
     assert probe_client.get("/probe/").json()["companies"] == ["Acme Sdn Bhd"]
 
-    assert run("SELECT current_user = session_user") == [(True,)]
-    assert run("SELECT coalesce(current_setting('app.user_id', true), '')") == [("",)]
+    assert query("SELECT current_user = session_user") == [(True,)]
+    assert query("SELECT coalesce(current_setting(%s, true), '')", [IDENTITY_SETTING]) == [("",)]
 
 
-# Tables the web role may touch without a tenant policy: Django's user and permission tables, plus the job table
-# until ticket 02d (#34) gives it a company id. Adding a table here needs a reason; a business table
-# never belongs on this list.
-NOT_TENANT_TABLES = {
-    "auth_group",
-    "auth_group_permissions",
-    "auth_permission",
-    "core_job",
-    "core_user",
-    "core_user_groups",
-    "core_user_user_permissions",
-    "django_content_type",
-}
-
-
-def test_every_table_the_web_role_can_use_is_under_row_level_security_or_listed_above(db):
+def test_every_table_the_web_role_can_use_is_under_row_level_security(db):
     unprotected = {
         table
-        for (table,) in run(
+        for (table,) in query(
             "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
             "WHERE n.nspname = 'public' AND c.relkind = 'r' "
-            "AND has_table_privilege('web', c.oid, 'SELECT,INSERT,UPDATE,DELETE') "
-            "AND NOT (c.relrowsecurity AND c.relforcerowsecurity)"
+            "AND has_table_privilege(%s, c.oid, 'SELECT,INSERT,UPDATE,DELETE') "
+            "AND NOT (c.relrowsecurity AND c.relforcerowsecurity)",
+            [WEB_ROLE],
         )
     }
 
-    assert unprotected == NOT_TENANT_TABLES
+    assert unprotected == set()
