@@ -22,7 +22,7 @@ def probe_job():
 
 @pytest.mark.django_db
 def test_signed_in_user_page_and_queued_job_work_with_all_four_fake_ports(client, fake_ports, probe_job):
-    user = get_user_model().objects.create_user("owner", password="unused")
+    user = get_user_model().objects.create_user("owner@example.com", password="unused-long-password")
     client.force_login(user)
 
     response = client.get("/")
@@ -44,7 +44,7 @@ def test_the_page_refuses_anonymous_visitors(client):
 
 @pytest.mark.django_db
 def test_the_page_is_translated_to_chinese_on_request(client):
-    client.force_login(get_user_model().objects.create_user("owner", password="unused"))
+    client.force_login(get_user_model().objects.create_user("owner@example.com", password="unused-long-password"))
 
     english = client.get("/").content.decode()
     chinese = client.get("/", headers={"accept-language": "zh-hans"}).content.decode()

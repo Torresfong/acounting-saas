@@ -38,3 +38,29 @@ def as_user(db):
                 cursor.execute("SELECT set_config(%s, '', false)", [IDENTITY_SETTING])
 
     return switch
+
+
+@pytest.fixture
+def as_production_connection(db):
+    """Make the whole connection behave like production: a login role that is only a member of `web`.
+
+    Unlike `as_user`, this changes who the connection is, not just the current role, so the session and
+    authentication lookups that run before the tenant middleware are subject to the same privileges as
+    everything else. Create fixtures first, then enter the block.
+    """
+
+    @contextmanager
+    def switch():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_test') THEN "
+                f"CREATE ROLE app_test LOGIN NOSUPERUSER NOBYPASSRLS IN ROLE {WEB_ROLE}; END IF; END $$"
+            )
+            cursor.execute("SET SESSION AUTHORIZATION app_test")
+        try:
+            yield
+        finally:
+            with connection.cursor() as cursor:
+                cursor.execute("RESET SESSION AUTHORIZATION")
+
+    return switch

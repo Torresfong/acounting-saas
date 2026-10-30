@@ -40,3 +40,17 @@ def drop_tenant_policy_sql(table):
 def enable_tenant_rls(table):
     """A migration operation that applies the standard isolation policy to `table`."""
     return migrations.RunSQL(tenant_policy_sql(table), drop_tenant_policy_sql(table))
+
+
+def owner_policy_sql(table):
+    """SQL that lets the role running the migration (the table owner) through `FORCE ROW LEVEL SECURITY`.
+
+    The SECURITY DEFINER functions of D40 (2) run as that role, and forced row-level security would
+    otherwise hide every row from them. The policy names the owner explicitly, so it opens nothing to the
+    web role or to a login role that is a member of it.
+    """
+    return [
+        "DO $$ BEGIN EXECUTE format("
+        f"'CREATE POLICY definer_functions ON {table} TO %I USING (true) WITH CHECK (true)', current_user); "
+        "END $$"
+    ]

@@ -17,7 +17,7 @@ def two_companies(db):
 
 
 def make_user(name):
-    return get_user_model().objects.create_user(name, password="unused")
+    return get_user_model().objects.create_user(f"{name}@example.com", password="unused-long-password")
 
 
 def member(name, company, role):
@@ -233,7 +233,15 @@ def test_in_a_real_transaction_the_role_and_identity_are_gone_after_the_request(
     assert query("SELECT coalesce(current_setting(%s, true), '')", [IDENTITY_SETTING]) == [("",)]
 
 
-def test_every_table_the_web_role_can_use_is_under_row_level_security(db):
+# Tables the web role may use without row-level security, each with a reason. A business table never
+# belongs here.
+NOT_TENANT_TABLES = {
+    # Session store: a session key and a signed blob naming a user id. No tenant data.
+    "django_session",
+}
+
+
+def test_every_table_the_web_role_can_use_is_under_row_level_security_or_listed_above(db):
     unprotected = {
         table
         for (table,) in query(
@@ -245,7 +253,7 @@ def test_every_table_the_web_role_can_use_is_under_row_level_security(db):
         )
     }
 
-    assert unprotected == set()
+    assert unprotected == NOT_TENANT_TABLES
 
 
 def test_an_identity_that_is_not_a_known_user_sees_nothing(db, two_companies):

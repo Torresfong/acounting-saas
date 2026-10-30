@@ -1,13 +1,42 @@
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
+from django.db.models.functions import Lower
 
 
-class User(AbstractUser):
-    """The sign-in identity. Deliberately empty for now: ticket 02b adds email login and the rest.
+class UserManager(BaseUserManager):
+    use_in_migrations = True
 
-    It exists so `CompanyAccess` can point at it from the first migration; swapping the user model
-    after tables reference it is painful in Django.
+    def create_user(self, email, password=None, **extra):
+        if not email:
+            raise ValueError("An email address is required")
+        user = self.model(email=self.normalize_email(email).lower(), **extra)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra):
+        extra.setdefault("is_superuser", True)
+        return self.create_user(email, password, **extra)
+
+
+class User(AbstractBaseUser, PermissionsMixin):
+    """The sign-in identity: an email address and a password (D40 (5)).
+
+    Which companies a user may act in, and as what, lives in `CompanyAccess`, not here.
     """
+
+    email = models.EmailField(unique=True)
+    is_active = models.BooleanField(default=True)
+    date_joined = models.DateTimeField(auto_now_add=True)
+
+    objects = UserManager()
+    USERNAME_FIELD = "email"
+
+    class Meta:
+        constraints = [models.UniqueConstraint(Lower("email"), name="user_email_unique_ignoring_case")]
+
+    def __str__(self):
+        return self.email
 
 
 class Company(models.Model):
@@ -38,7 +67,12 @@ class CompanyAccess(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        constraints = [models.UniqueConstraint(fields=["user", "company"], name="one_access_row_per_user_company")]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "company"], name="one_access_row_per_user_company"),
+            models.UniqueConstraint(
+                fields=["company"], condition=models.Q(role="owner"), name="one_owner_per_company"
+            ),
+        ]
 
 
 class TenantModel(models.Model):
@@ -69,3 +103,34 @@ class Job(models.Model):
     attempts = models.PositiveSmallIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+
+
+class LoginFailure(models.Model):
+    """One failed sign-in attempt, for throttling. Only the hash of the email address is kept.
+
+    The web role has no direct access to this table; it goes through the functions in migration 0007.
+    """
+
+    email_hash = models.CharField(max_length=64, db_index=True)
+    at = models.DateTimeField(auto_now_add=True)
+
+
+class AuthToken(models.Model):
+    """A single-use, expiring link: a password reset or an invitation (D40 (5)).
+
+    Only the SHA-256 hash of the token is stored, so a database reader cannot use a link. The web role has
+    no direct access to this table; it goes through the functions in migrations 0009 and 0010.
+    """
+
+    RESET = "reset"
+    INVITE = "invite"
+
+    purpose = models.CharField(max_length=10)
+    token_hash = models.CharField(max_length=64, unique=True)
+    email = models.EmailField()
+    company = models.ForeignKey(Company, null=True, blank=True, on_delete=models.CASCADE)
+    role = models.CharField(max_length=20, blank=True)
+    user = models.ForeignKey("core.User", null=True, blank=True, on_delete=models.CASCADE, related_name="+")
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)

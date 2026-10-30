@@ -1,0 +1,13 @@
+{% load i18n %}<!doctype html>
+<html lang="{{ LANGUAGE_CODE }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% trans "This link no longer works" %}</title>
+</head>
+<body>
+  <h1>{% trans "This link no longer works" %}</h1>
+  <p>{% trans "It may have expired or already been used. Ask for a new one." %}</p>
+  <p><a href="/login/">{% trans "Back to sign in" %}</a></p>
+</body>
+</html>
