@@ -36,7 +36,7 @@ Stop and ask when: a decision conflicts; scope would change; a migration alters 
 
 ## Hard rules
 - External services only through the four ports (MyInvois, AI provider, email, object storage), each a single module with a test fake. Swapping an implementation must not touch callers.
-- Tenancy: every business table has a company id; Postgres RLS enforces isolation from the first migration. Never rely on application filtering alone.
+- Tenancy: every business table has a company id; Postgres RLS enforces isolation from the first migration. Never rely on application filtering alone. The pattern, role model and its limits are in docs/architecture/tenancy.md; new tenant tables use `core.rls.enable_tenant_rls`.
 - Jobs (D36, ADR 0001): job rows carry a company id under RLS and are claimed by a separate worker role, which sets the company context from that column, never from the payload (the column, policy and roles arrive with ticket 02, #3; until then no handler may touch tenant data). Payloads hold identifiers only, enforced by `enqueue()`. A failed job keeps only the exception class, and handlers must not log content.
 - Roles (D17, D40): client owner, client staff, firm accountant. Only the owner approves and submits; no delegation. Access is by `CompanyAccess` membership under RLS, with no bypass role. 2FA for owners and accountants is a go-live blocker.
 - Invoices: gapless numbering per company and document type. Approval copies and locks buyer details. After go-live the platform is the client's only issuer.
