@@ -144,3 +144,22 @@ def test_an_account_with_no_company_writes_nothing(db):
     query("SELECT record_auth_event('login', 'loner@example.com')")
 
     assert AuditEntry.objects.count() == 0
+
+
+def test_a_staff_session_at_the_database_can_read_the_whole_company_trail_but_nothing_more(as_user, world):
+    """Known limit, pinned on purpose: 'staff read only their own activity' is the permission service.
+
+    Row-level security isolates companies, not roles, so SQL run as `web` in a staff session sees every
+    entry of that company (D40 (3)). If a role rule is ever added to the policy, this test is the one to change.
+    """
+    owner, staff = world["acme_owner"], world["acme_staff"]
+    AuditEntry.objects.create(company=world["acme"], actor_id=owner.pk, actor_email=owner.email, action="create")
+    AuditEntry.objects.create(company=world["acme"], actor_id=staff.pk, actor_email=staff.email, action="create")
+    AuditEntry.objects.create(company=world["beta"], actor_id=9, actor_email="b@x", action="create")
+
+    with as_user(staff):
+        seen = {actor for (actor,) in query("SELECT actor_email FROM core_auditentry")}
+        with pytest.raises(DatabaseError), transaction.atomic():
+            query("UPDATE core_auditentry SET action = 'login'")
+
+    assert seen == {owner.email, staff.email}

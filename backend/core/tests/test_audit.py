@@ -285,3 +285,22 @@ def test_someone_already_signed_in_is_sent_home_and_cannot_sign_in_as_another_ac
 
     assert response.status_code == 302
     assert "staff@acme.example" in home and "owner@acme.example" not in home
+
+
+def test_a_delete_records_who_where_which_record_and_when_but_none_of_the_deleted_values(
+    client, world, notes_table, as_production_connection
+):
+    secret = "customer TIN C1234567890 total RM 18,450.00"
+    with as_production_connection():
+        sign_in(client, world["acme_owner"])
+        note_id = make_note(client, world["acme"], secret)
+        client.post(f"/notes/{note_id}/delete/")
+
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT string_agg(row(a.*)::text, ' ') FROM core_auditentry a")
+        everything = cursor.fetchone()[0]
+    deleted = AuditEntry.objects.get(action=AuditEntry.DELETE)
+    assert deleted.actor_email == "owner@acme.example" and deleted.company_id == world["acme"].pk
+    assert (deleted.target_type, deleted.target_id) == ("probe_note", str(note_id))
+    assert deleted.occurred_at is not None and deleted.changed_fields == []
+    assert secret not in everything and "C1234567890" not in everything and "18,450" not in everything
