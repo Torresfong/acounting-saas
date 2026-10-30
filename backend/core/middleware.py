@@ -1,4 +1,5 @@
 from django.db import connection, transaction
+from psycopg.pq import TransactionStatus
 
 from .rls import IDENTITY_SETTING, WEB_ROLE
 
@@ -12,9 +13,10 @@ class TenantContextMiddleware:
     identity, which matches no company. Place it after AuthenticationMiddleware.
 
     When the request is already inside an outer transaction (tests), releasing the request's savepoint
-    does not undo SET LOCAL, so the role and identity are reset explicitly on the normal path. If the
-    request fails, the rollback undoes them, and running more SQL in the failed transaction would only
-    hide the original error.
+    does not undo SET LOCAL, so the role and identity are reset explicitly on the normal path. If a
+    database error left the transaction aborted (Django may already have turned it into a 500 response),
+    more SQL would only raise and hide the original error, so the request's transaction is marked for
+    rollback instead, which undoes them.
 
     Limits are documented in docs/architecture/tenancy.md: the web role can still change its own setting,
     and a streaming response is read after this middleware returns, outside the role.
@@ -32,7 +34,9 @@ class TenantContextMiddleware:
                 cursor.execute(f"SET LOCAL ROLE {WEB_ROLE}")
                 cursor.execute("SELECT set_config(%s, %s, true)", [IDENTITY_SETTING, user_id])
             response = self.get_response(request)
-            if not connection.needs_rollback:
+            if connection.connection.info.transaction_status == TransactionStatus.INERROR:
+                transaction.set_rollback(True)
+            else:
                 with connection.cursor() as cursor:
                     cursor.execute("RESET ROLE")
                     cursor.execute("SELECT set_config(%s, '', true)", [IDENTITY_SETTING])
