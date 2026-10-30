@@ -61,3 +61,32 @@ def complete_password_reset(raw, password):
             return _scalar("SELECT complete_password_reset(%s, %s)", [hash_token(raw), make_password(password)])
     except DatabaseError as error:
         raise InvalidLink from error
+
+
+def invite_staff(company, email, build_url):
+    """Email an invitation to join `company` as staff. The database checks that the caller owns the company.
+
+    Raises IntegrityError when the address already has an account.
+    """
+    raw, hashed = new_token()
+    expires = timezone.now() + timedelta(days=settings.INVITE_LINK_DAYS)
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT create_invitation(%s, %s, %s, %s)", [hashed, email, company.pk, expires])
+    ports.get().email.send(
+        email,
+        _("You are invited to join %(company)s") % {"company": company.name},
+        _(
+            "You have been invited to join %(company)s. Use this link to choose a password. "
+            "It works once and expires in %(days)s days:\n\n%(url)s\n"
+        )
+        % {"company": company.name, "days": settings.INVITE_LINK_DAYS, "url": build_url(raw)},
+    )
+
+
+def accept_invitation(raw, password):
+    try:
+        with transaction.atomic():
+            return _scalar("SELECT accept_invitation(%s, %s)", [hash_token(raw), make_password(password)])
+    except DatabaseError as error:
+        raise InvalidLink from error

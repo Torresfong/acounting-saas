@@ -52,3 +52,68 @@ def test_a_company_can_have_many_staff_and_the_same_person_can_own_only_once_per
     )
 
     assert company.access.count() == 3
+
+
+def as_web_query(sql, params=()):
+    from django.db import connection
+
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        return cursor.fetchall(), [column.name for column in cursor.description]
+
+
+def test_the_web_role_sees_only_its_own_user_row(as_user, db):
+    from core.models import CompanyAccess
+
+    _, (owner, staff) = make_company_with(
+        ("owner@example.com", CompanyAccess.OWNER), ("staff@example.com", CompanyAccess.STAFF)
+    )
+
+    with as_user(staff):
+        rows, _ = as_web_query("SELECT email FROM core_user")
+
+    assert rows == [("staff@example.com",)]
+
+
+def test_the_web_role_cannot_create_change_or_delete_users(as_user, db):
+    from django.db import DatabaseError
+
+    from core.models import CompanyAccess
+
+    _, (owner,) = make_company_with(("owner@example.com", CompanyAccess.OWNER))
+
+    with as_user(owner):
+        for statement in [
+            "UPDATE core_user SET is_superuser = true",
+            "DELETE FROM core_user",
+            "INSERT INTO core_user (password, is_superuser, email, is_active, date_joined) "
+            "VALUES ('x', true, 'evil@example.com', true, now())",
+        ]:
+            with pytest.raises(DatabaseError), transaction.atomic():
+                as_web_query(statement)
+
+
+@pytest.mark.parametrize("table", ["core_authtoken", "core_loginfailure"])
+def test_the_web_role_cannot_read_the_token_or_throttle_tables_directly(as_user, db, table):
+    from django.db import DatabaseError
+
+    from core.models import CompanyAccess
+
+    _, (owner,) = make_company_with(("owner@example.com", CompanyAccess.OWNER))
+
+    with as_user(owner), pytest.raises(DatabaseError), transaction.atomic():
+        as_web_query(f"SELECT * FROM {table}")
+
+
+def test_the_sign_in_lookup_returns_only_what_sign_in_needs_for_an_exact_match(as_user, db):
+    from core.models import CompanyAccess
+
+    make_company_with(("owner@example.com", CompanyAccess.OWNER))
+
+    with as_user(User.objects.get()):
+        found, columns = as_web_query("SELECT * FROM auth_lookup(%s)", ["Owner@Example.com"])
+        guessed, _ = as_web_query("SELECT * FROM auth_lookup(%s)", ["owner@%"])
+        unknown, _ = as_web_query("SELECT * FROM auth_lookup(%s)", ["nobody@example.com"])
+
+    assert columns == ["id", "password", "is_active"] and len(found) == 1
+    assert guessed == [] and unknown == []

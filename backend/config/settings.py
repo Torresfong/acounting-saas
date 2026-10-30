@@ -73,6 +73,9 @@ AUTHENTICATION_BACKENDS = ["core.auth.EmailBackend"]
 LOGIN_MAX_FAILURES = 5
 LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
 
+# Where links in emails sent outside a request (operator commands) point.
+BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000")
+
 # Password reset links last an hour, invitations a week (D40 (5)).
 RESET_LINK_HOURS = 1
 INVITE_LINK_DAYS = 7

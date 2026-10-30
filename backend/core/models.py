@@ -1,6 +1,7 @@
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.db import models
 from django.db.models.functions import Lower
+from django.utils.translation import gettext_lazy as _
 
 
 class UserManager(BaseUserManager):
@@ -59,7 +60,7 @@ class CompanyAccess(models.Model):
     OWNER = "owner"
     STAFF = "staff"
     ACCOUNTANT = "accountant"
-    ROLES = [(OWNER, "Client owner"), (STAFF, "Client staff"), (ACCOUNTANT, "Firm accountant")]
+    ROLES = [(OWNER, _("Client owner")), (STAFF, _("Client staff")), (ACCOUNTANT, _("Firm accountant"))]
 
     user = models.ForeignKey("core.User", on_delete=models.CASCADE, related_name="company_access")
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="access")

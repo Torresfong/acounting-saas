@@ -2,13 +2,13 @@
 # Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
 # This file is distributed under the same license as the PACKAGE package.
 # FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
-# 
+#
 #, fuzzy
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-28 16:29+0800\n"
+"POT-Creation-Date: 2026-10-30 13:55+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,6 +18,48 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
+#: .\core\models.py:63
+msgid "Client owner"
+msgstr "客户所有者"
+
+#: .\core\models.py:63
+msgid "Client staff"
+msgstr "客户员工"
+
+#: .\core\models.py:63
+msgid "Firm accountant"
+msgstr "事务所会计师"
+
+#: .\core\templates\companies.html:6 .\core\templates\companies.html:9
+msgid "Companies"
+msgstr "公司"
+
+#: .\core\templates\companies.html:14
+msgid "You do not have access to any company yet."
+msgstr "您还没有任何公司的访问权限。"
+
+#: .\core\templates\company.html:10
+#, python-format
+msgid "Your role: %(role)s"
+msgstr "您的角色：%(role)s"
+
+#: .\core\templates\company.html:15
+msgid "Invite a colleague"
+msgstr "邀请同事"
+
+#: .\core\templates\company.html:18 .\core\templates\login.html:13
+#: .\core\templates\password_reset.html:15
+msgid "Email address"
+msgstr "电子邮件地址"
+
+#: .\core\templates\company.html:19
+msgid "Send invitation"
+msgstr "发送邀请"
+
+#: .\core\templates\company.html:22
+msgid "All companies"
+msgstr "所有公司"
+
 #: .\core\templates\home.html:6
 msgid "Accounting platform"
 msgstr "会计平台"
@@ -25,3 +67,116 @@ msgstr "会计平台"
 #: .\core\templates\home.html:9
 msgid "Welcome"
 msgstr "欢迎"
+
+#: .\core\templates\home.html:10
+#, python-format
+msgid "Signed in as %(email)s"
+msgstr "已登录为 %(email)s"
+
+#: .\core\templates\home.html:13
+msgid "Sign out"
+msgstr "退出登录"
+
+#: .\core\templates\link_invalid.html:6 .\core\templates\link_invalid.html:9
+msgid "This link no longer works"
+msgstr "此链接已失效"
+
+#: .\core\templates\link_invalid.html:10
+msgid "It may have expired or already been used. Ask for a new one."
+msgstr "链接可能已过期或已被使用，请重新申请。"
+
+#: .\core\templates\link_invalid.html:11
+#: .\core\templates\password_reset.html:19
+msgid "Back to sign in"
+msgstr "返回登录"
+
+#: .\core\templates\login.html:6 .\core\templates\login.html:9
+#: .\core\templates\login.html:15
+msgid "Sign in"
+msgstr "登录"
+
+#: .\core\templates\login.html:14
+msgid "Password"
+msgstr "密码"
+
+#: .\core\templates\password_reset.html:6
+#: .\core\templates\password_reset.html:9 .\core\tokens.py:51
+msgid "Reset your password"
+msgstr "重置密码"
+
+#: .\core\templates\password_reset.html:11
+msgid ""
+"If that email address has an account, we have sent a link to choose a new "
+"password."
+msgstr "如果该电子邮件地址已注册账户，我们已发送设置新密码的链接。"
+
+#: .\core\templates\password_reset.html:16
+msgid "Send reset link"
+msgstr "发送重置链接"
+
+#: .\core\templates\password_set.html:13
+msgid "New password"
+msgstr "新密码"
+
+#: .\core\templates\password_set.html:14
+msgid "Repeat the password"
+msgstr "再次输入密码"
+
+#: .\core\templates\password_set.html:15
+msgid "Save password"
+msgstr "保存密码"
+
+#: .\core\tokens.py:52
+#, python-format
+msgid ""
+"Use this link to choose a new password. It works once and expires in %(hours)s hour(s):\n"
+"\n"
+"%(url)s\n"
+msgstr ""
+"请使用此链接设置新密码。链接仅可使用一次，%(hours)s 小时后失效：\n"
+"\n"
+"%(url)s\n"
+
+#: .\core\tokens.py:78
+#, python-format
+msgid "You are invited to join %(company)s"
+msgstr "邀请您加入 %(company)s"
+
+#: .\core\tokens.py:80
+#, python-format
+msgid ""
+"You have been invited to join %(company)s. Use this link to choose a password. It works once and expires in %(days)s days:\n"
+"\n"
+"%(url)s\n"
+msgstr ""
+"您已被邀请加入 %(company)s。请使用此链接设置密码。链接仅可使用一次，%(days)s 天后失效：\n"
+"\n"
+"%(url)s\n"
+
+#: .\core\views.py:38
+msgid "Too many failed attempts. Try again in a few minutes."
+msgstr "失败次数过多，请几分钟后再试。"
+
+#: .\core\views.py:44
+msgid "The email address or password is not correct."
+msgstr "电子邮件地址或密码不正确。"
+
+#: .\core\views.py:68
+msgid "The two passwords do not match."
+msgstr "两次输入的密码不一致。"
+
+#: .\core\views.py:95
+msgid "Choose a new password"
+msgstr "设置新密码"
+
+#: .\core\views.py:119
+msgid "Invitation sent."
+msgstr "邀请已发送。"
+
+#: .\core\views.py:136
+msgid "That email address cannot be invited."
+msgstr "无法邀请该电子邮件地址。"
+
+#: .\core\views.py:142
+msgid "Choose your password"
+msgstr "设置您的密码"

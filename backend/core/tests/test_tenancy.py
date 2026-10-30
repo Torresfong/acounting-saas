@@ -311,3 +311,16 @@ def test_the_migration_refuses_to_continue_if_the_web_role_is_still_unsafe(db, u
 
 def test_the_web_role_created_by_the_migrations_has_only_safe_attributes(db):
     assert query(ROLE_ATTRIBUTES, [WEB_ROLE]) == [(False, False, False, False, False)]
+
+
+def test_a_migrating_role_that_is_not_a_superuser_can_run_the_role_step_against_a_safe_web_role(db):
+    """Changing the SUPERUSER attribute at all needs a superuser, so the step must not touch a safe role."""
+    with connection.cursor() as cursor:
+        cursor.execute("DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tmp_migrator') "
+                       "THEN CREATE ROLE tmp_migrator NOLOGIN CREATEROLE NOSUPERUSER; END IF; END $$")
+        cursor.execute("SET ROLE tmp_migrator")
+        try:
+            cursor.execute(role_migration.SECURE_ROLE)
+            cursor.execute(role_migration.VERIFY_ROLE)
+        finally:
+            cursor.execute("RESET ROLE")
