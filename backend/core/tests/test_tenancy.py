@@ -244,3 +244,34 @@ def test_every_table_the_web_role_can_use_is_under_row_level_security(db):
     }
 
     assert unprotected == set()
+
+
+def test_an_identity_that_is_not_a_known_user_sees_nothing(db, two_companies):
+    member("acme-owner", two_companies[0], CompanyAccess.OWNER)
+
+    with connection.cursor() as cursor:
+        cursor.execute(f"SET ROLE {WEB_ROLE}")
+        try:
+            for unknown in ["999999", "0", "-1"]:
+                cursor.execute("SELECT set_config(%s, %s, false)", [IDENTITY_SETTING, unknown])
+                cursor.execute("SELECT count(*) FROM core_company")
+                assert cursor.fetchone()[0] == 0
+        finally:
+            cursor.execute("RESET ROLE")
+            cursor.execute("SELECT set_config(%s, '', false)", [IDENTITY_SETTING])
+
+
+def test_a_malformed_identity_is_an_error_and_never_returns_rows(db, two_companies):
+    member("acme-owner", two_companies[0], CompanyAccess.OWNER)
+
+    for malformed in ["abc", "1 OR 1=1", "1,2", "NULL"]:
+        with connection.cursor() as cursor:
+            cursor.execute(f"SET ROLE {WEB_ROLE}")
+            cursor.execute("SELECT set_config(%s, %s, false)", [IDENTITY_SETTING, malformed])
+            try:
+                with pytest.raises(DatabaseError), transaction.atomic():
+                    cursor.execute("SELECT * FROM core_company")
+                    cursor.fetchall()
+            finally:
+                cursor.execute("RESET ROLE")
+                cursor.execute("SELECT set_config(%s, '', false)", [IDENTITY_SETTING])
