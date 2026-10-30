@@ -1,3 +1,5 @@
+from importlib import import_module
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError, connection, transaction
@@ -275,3 +277,29 @@ def test_a_malformed_identity_is_an_error_and_never_returns_rows(db, two_compani
             finally:
                 cursor.execute("RESET ROLE")
                 cursor.execute("SELECT set_config(%s, '', false)", [IDENTITY_SETTING])
+
+
+role_migration = import_module("core.migrations.0003_row_level_security")
+
+ROLE_ATTRIBUTES = "SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolcanlogin FROM pg_roles WHERE rolname = %s"
+
+
+def test_an_existing_web_role_with_unsafe_attributes_is_made_safe_by_the_migration(db):
+    with connection.cursor() as cursor:
+        cursor.execute(f"ALTER ROLE {WEB_ROLE} SUPERUSER BYPASSRLS CREATEROLE CREATEDB LOGIN")
+        cursor.execute(role_migration.SECURE_ROLE)
+        cursor.execute(role_migration.VERIFY_ROLE)
+
+    assert query(ROLE_ATTRIBUTES, [WEB_ROLE]) == [(False, False, False, False, False)]
+
+
+@pytest.mark.parametrize("unsafe", ["SUPERUSER", "BYPASSRLS", "CREATEROLE", "CREATEDB", "LOGIN"])
+def test_the_migration_refuses_to_continue_if_the_web_role_is_still_unsafe(db, unsafe):
+    with connection.cursor() as cursor:
+        cursor.execute(f"ALTER ROLE {WEB_ROLE} {unsafe}")
+        with pytest.raises(DatabaseError, match="unsafe attributes"), transaction.atomic():
+            cursor.execute(role_migration.VERIFY_ROLE)
+
+
+def test_the_web_role_created_by_the_migrations_has_only_safe_attributes(db):
+    assert query(ROLE_ATTRIBUTES, [WEB_ROLE]) == [(False, False, False, False, False)]

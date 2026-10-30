@@ -2,18 +2,37 @@ from django.db import migrations
 
 from core.rls import IDENTITY_FUNCTION, IDENTITY_SETTING, WEB_ROLE
 
-CREATE_ROLE = f"""
+# The role may already exist (it is cluster-wide), so creating it only when absent would trust whatever
+# attributes it has. Create it or force the secure attributes, then refuse to continue unless they hold.
+SECURE_ROLE = f"""
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{WEB_ROLE}') THEN
         CREATE ROLE {WEB_ROLE} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    ELSE
+        ALTER ROLE {WEB_ROLE} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+    END IF;
+END
+$$
+"""
+
+VERIFY_ROLE = f"""
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT FROM pg_roles
+        WHERE rolname = '{WEB_ROLE}'
+          AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolcanlogin)
+    ) THEN
+        RAISE EXCEPTION 'Database role {WEB_ROLE} has unsafe attributes; it must be NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB';
     END IF;
 END
 $$
 """
 
 FORWARD = [
-    CREATE_ROLE,
+    SECURE_ROLE,
+    VERIFY_ROLE,
     # The signed-in user's id as a transaction-local setting; missing or empty means nobody.
     f"""
     CREATE FUNCTION {IDENTITY_FUNCTION}() RETURNS bigint LANGUAGE sql STABLE AS
