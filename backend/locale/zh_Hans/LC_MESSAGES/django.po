@@ -31,7 +31,6 @@ msgid "Firm accountant"
 msgstr "事务所会计师"
 
 #: .\core\models.py:161
-#| msgid "Sign in"
 msgid "Signed in"
 msgstr "已登录"
 
@@ -40,7 +39,6 @@ msgid "Failed sign-in"
 msgstr "登录失败"
 
 #: .\core\models.py:163
-#| msgid "Sign out"
 msgid "Signed out"
 msgstr "已退出登录"
 

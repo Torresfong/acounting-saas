@@ -1,5 +1,12 @@
+import re
+
 import pytest
+from django.db import connection
 from django.test import Client
+
+from core.audit import audit_trigger_sql
+from core.models import AuditEntry
+from core.rls import tenant_policy_sql
 
 from .factories import PASSWORD
 
@@ -46,8 +53,6 @@ def test_signing_out_is_recorded(client, world, as_production_connection):
 
 
 def test_a_failed_sign_in_for_an_unknown_address_is_not_recorded_anywhere(client, world, as_production_connection):
-    from core.models import AuditEntry
-
     with as_production_connection():
         client.post("/login/", {"email": "nobody@nowhere.example", "password": "whatever"})
 
@@ -55,8 +60,6 @@ def test_a_failed_sign_in_for_an_unknown_address_is_not_recorded_anywhere(client
 
 
 def test_attempts_refused_by_the_lock_are_not_recorded(client, world, as_production_connection):
-    from core.models import AuditEntry
-
     with as_production_connection():
         for _ in range(5):
             sign_in(client, world["acme_staff"], "not the password")
@@ -154,10 +157,7 @@ def test_no_page_accepts_a_change_to_the_trail(client, world, path, method, as_p
 @pytest.fixture
 def notes_table(db, settings):
     """A business table built the way later tickets will build theirs: tenant policy plus the audit trigger."""
-    from django.db import connection
 
-    from core.audit import audit_trigger_sql
-    from core.rls import tenant_policy_sql
 
     settings.ROOT_URLCONF = "core.tests.urls_probe"
     with connection.cursor() as cursor:
@@ -219,8 +219,6 @@ def test_a_delete_is_recorded(client, world, notes_table, as_production_connecti
 
 
 def test_an_update_that_changes_nothing_records_nothing(client, world, notes_table, as_production_connection):
-    from core.models import AuditEntry
-
     with as_production_connection():
         sign_in(client, world["acme_owner"])
         note_id = make_note(client, world["acme"], "same text")
@@ -230,10 +228,6 @@ def test_an_update_that_changes_nothing_records_nothing(client, world, notes_tab
 
 
 def test_a_change_made_with_no_signed_in_user_is_recorded_as_the_system(world, notes_table):
-    from django.db import connection
-
-    from core.models import AuditEntry
-
     with connection.cursor() as cursor:
         cursor.execute("INSERT INTO probe_note (company_id, body) VALUES (%s, 'operator fix')", [world["acme"].pk])
 
@@ -242,10 +236,6 @@ def test_a_change_made_with_no_signed_in_user_is_recorded_as_the_system(world, n
 
 
 def test_nothing_in_the_trail_contains_a_password_or_a_token(client, world, fake_ports, as_production_connection):
-    import re
-
-    from django.db import connection
-
     with as_production_connection():
         sign_in(client, world["acme_staff"], "hunter2-definitely-wrong")
         sign_in(client, world["acme_staff"])
@@ -284,3 +274,14 @@ def test_the_audit_pages_are_in_chinese_on_request(client, world, as_production_
 
     assert "审计记录" in full and "已登录" in full and "时间" in full
     assert "我的操作记录" in own
+
+
+def test_someone_already_signed_in_is_sent_home_and_cannot_sign_in_as_another_account(client, world, as_production_connection):
+    with as_production_connection():
+        sign_in(client, world["acme_staff"])
+        assert client.get("/login/").status_code == 302
+        response = sign_in(client, world["acme_owner"])
+        home = client.get("/").content.decode()
+
+    assert response.status_code == 302
+    assert "staff@acme.example" in home and "owner@acme.example" not in home

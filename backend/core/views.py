@@ -26,6 +26,9 @@ def home(request):
 
 
 def sign_in(request):
+    if request.user.is_authenticated:
+        # Sign out first to use another account: a signed-in session may only record its own sign-in events.
+        return redirect("/")
     if request.method != "POST":
         return render(request, "login.html")
 
@@ -155,23 +158,23 @@ def accept_invitation(request, token):
 ENTRIES_SHOWN = 200
 
 
-@require_safe
-def audit_trail(request, pk):
-    """The company's full trail: the owner and the firm's accountants. Staff see their own activity instead."""
+def _trail_page(request, pk, action, heading, **only):
+    """A page of audit entries for company `pk`. Company isolation is row-level security; `action` is the role rule."""
     if not request.user.is_authenticated:
         return HttpResponse(status=401)
     access = _own_access(request, pk)
-    permissions.require(request.user, "view_audit_trail", access.company)
-    entries = AuditEntry.objects.filter(company=access.company)[:ENTRIES_SHOWN]
-    return render(request, "audit.html", {"company": access.company, "entries": entries, "heading": _("Audit trail")})
+    permissions.require(request.user, action, access.company)
+    entries = AuditEntry.objects.filter(company=access.company, **only)[:ENTRIES_SHOWN]
+    return render(request, "audit.html", {"company": access.company, "entries": entries, "heading": heading})
+
+
+@require_safe
+def audit_trail(request, pk):
+    """The company's full trail: the owner and the firm's accountants. Staff see their own activity instead."""
+    return _trail_page(request, pk, "view_audit_trail", _("Audit trail"))
 
 
 @require_safe
 def my_activity(request, pk):
-    """What the signed-in user themself has done in the company. Company isolation is row-level security."""
-    if not request.user.is_authenticated:
-        return HttpResponse(status=401)
-    access = _own_access(request, pk)
-    permissions.require(request.user, "view_own_activity", access.company)
-    entries = AuditEntry.objects.filter(company=access.company, actor_id=request.user.pk)[:ENTRIES_SHOWN]
-    return render(request, "audit.html", {"company": access.company, "entries": entries, "heading": _("My activity")})
+    """What the signed-in user themself has done in the company."""
+    return _trail_page(request, pk, "view_own_activity", _("My activity"), actor_id=request.user.pk)

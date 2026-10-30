@@ -39,6 +39,12 @@ BEGIN
         v_fields,
         now()
     );
+    -- A row moved to another company leaves a trace in the company it left as well.
+    IF TG_OP = 'UPDATE' AND (to_jsonb(OLD) ->> 'company_id') IS DISTINCT FROM (v_row ->> 'company_id') THEN
+        INSERT INTO core_auditentry (company_id, actor_id, actor_email, action, target_type, target_id, changed_fields, occurred_at)
+        VALUES ((to_jsonb(OLD) ->> 'company_id')::bigint, {IDENTITY_FUNCTION}(), coalesce(v_email, ''), 'update',
+                TG_TABLE_NAME, v_row ->> 'id', v_fields, now());
+    END IF;
     RETURN NULL;
 END
 $$

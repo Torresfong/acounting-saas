@@ -7,6 +7,12 @@ from core.rls import IDENTITY_FUNCTION, WEB_ROLE, definer_function_sql, owner_po
 # other role as well, so nothing in the application can rewrite history.
 
 ACCESSIBLE = f"company_id IN (SELECT company_id FROM core_companyaccess WHERE user_id = {IDENTITY_FUNCTION}())"
+# A signed-in user can add entries only as themselves: the actor must be the caller and the address must be
+# the caller's own (or blank), so the web role cannot write an entry in someone else's name.
+AS_CALLER = (
+    f"actor_id IS NOT DISTINCT FROM {IDENTITY_FUNCTION}() AND actor_email IN ('', "
+    f"coalesce((SELECT email FROM core_user WHERE id = {IDENTITY_FUNCTION}()), ''))"
+)
 
 APPEND_ONLY_FUNCTION = """
 CREATE FUNCTION audit_entries_are_append_only() RETURNS trigger LANGUAGE plpgsql
@@ -14,6 +20,18 @@ SET search_path = pg_catalog, public, pg_temp AS
 $$
 BEGIN
     RAISE EXCEPTION 'audit entries cannot be changed or deleted' USING ERRCODE = '23001';
+END
+$$
+"""
+
+# The time of an entry is the database's, not the caller's, so an entry cannot be back-dated.
+STAMP_FUNCTION = """
+CREATE FUNCTION audit_entry_stamp() RETURNS trigger LANGUAGE plpgsql
+SET search_path = pg_catalog, public, pg_temp AS
+$$
+BEGIN
+    NEW.occurred_at := now();
+    RETURN NEW;
 END
 $$
 """
@@ -28,6 +46,7 @@ $$
 DECLARE
     v_user bigint;
     v_email text;
+    v_caller bigint := app_user_id();
 BEGIN
     IF p_action NOT IN ('login', 'login_failed', 'logout') THEN
         RAISE EXCEPTION 'not a sign-in event' USING ERRCODE = '22023';
@@ -36,6 +55,10 @@ BEGIN
         SELECT id, email INTO v_user, v_email FROM core_user WHERE id = app_user_id();
     ELSE
         SELECT id, email INTO v_user, v_email FROM core_user WHERE lower(email) = lower(p_email);
+        -- Someone already signed in can record only their own events, never one in another account's name.
+        IF v_caller IS NOT NULL AND v_user IS DISTINCT FROM v_caller THEN
+            RAISE EXCEPTION 'a signed-in user can record only their own sign-in events' USING ERRCODE = '42501';
+        END IF;
     END IF;
     IF v_user IS NULL THEN
         RETURN;
@@ -51,13 +74,16 @@ FUNCTION_FORWARD, FUNCTION_REVERSE = definer_function_sql({"record_auth_event(te
 
 FORWARD = [
     APPEND_ONLY_FUNCTION,
+    STAMP_FUNCTION,
+    "CREATE TRIGGER audit_entries_are_stamped BEFORE INSERT ON core_auditentry "
+    "FOR EACH ROW EXECUTE FUNCTION audit_entry_stamp()",
     "CREATE TRIGGER audit_rows_are_append_only BEFORE UPDATE OR DELETE ON core_auditentry "
     "FOR EACH ROW EXECUTE FUNCTION audit_entries_are_append_only()",
     f"GRANT SELECT, INSERT ON core_auditentry TO {WEB_ROLE}",
     "ALTER TABLE core_auditentry ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE core_auditentry FORCE ROW LEVEL SECURITY",
     f"CREATE POLICY company_entries ON core_auditentry FOR SELECT TO {WEB_ROLE} USING ({ACCESSIBLE})",
-    f"CREATE POLICY company_inserts ON core_auditentry FOR INSERT TO {WEB_ROLE} WITH CHECK ({ACCESSIBLE})",
+    f"CREATE POLICY company_inserts ON core_auditentry FOR INSERT TO {WEB_ROLE} WITH CHECK ({ACCESSIBLE} AND {AS_CALLER})",
     *owner_policy_sql("core_auditentry"),
     *FUNCTION_FORWARD,
 ]
@@ -70,6 +96,8 @@ REVERSE = [
     "ALTER TABLE core_auditentry DISABLE ROW LEVEL SECURITY",
     f"REVOKE ALL ON core_auditentry FROM {WEB_ROLE}",
     "DROP TRIGGER IF EXISTS audit_rows_are_append_only ON core_auditentry",
+    "DROP TRIGGER IF EXISTS audit_entries_are_stamped ON core_auditentry",
+    "DROP FUNCTION IF EXISTS audit_entry_stamp()",
     "DROP FUNCTION IF EXISTS audit_entries_are_append_only()",
 ]
 

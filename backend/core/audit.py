@@ -35,8 +35,16 @@ def record(action, company, actor, target_type="", target_id="", changed_fields=
 
 
 def audit_trigger_sql(table):
-    """SQL that puts `table` under the audit trigger. The table needs `id` and `company_id` columns."""
-    return [f"CREATE TRIGGER audit_changes AFTER INSERT OR UPDATE OR DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION audit_row_change()"]
+    """SQL that puts `table` under the audit trigger. The table needs `id` and `company_id` columns.
+
+    The first statement refuses a table without them: the trigger would otherwise fail on the first write
+    and block it.
+    """
+    return [
+        "DO $$ BEGIN IF (SELECT count(*) FROM information_schema.columns WHERE table_schema = current_schema() "
+        f"AND table_name = '{table}' AND column_name IN ('id', 'company_id')) < 2 THEN "
+        f"RAISE EXCEPTION 'cannot audit {table}: it needs id and company_id columns'; END IF; END $$",
+        f"CREATE TRIGGER audit_changes AFTER INSERT OR UPDATE OR DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION audit_row_change()"]
 
 
 def drop_audit_trigger_sql(table):
