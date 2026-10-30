@@ -17,7 +17,7 @@ def two_companies(db):
 
 
 def make_user(name):
-    return get_user_model().objects.create_user(name, password="unused")
+    return get_user_model().objects.create_user(f"{name}@example.com", password="unused-long-password")
 
 
 def member(name, company, role):
@@ -233,7 +233,15 @@ def test_in_a_real_transaction_the_role_and_identity_are_gone_after_the_request(
     assert query("SELECT coalesce(current_setting(%s, true), '')", [IDENTITY_SETTING]) == [("",)]
 
 
-def test_every_table_the_web_role_can_use_is_under_row_level_security(db):
+# Tables the web role may use without row-level security, each with a reason. A business table never
+# belongs here.
+NOT_TENANT_TABLES = {
+    # Session store: a session key and a signed blob naming a user id. No tenant data.
+    "django_session",
+}
+
+
+def test_every_table_the_web_role_can_use_is_under_row_level_security_or_listed_above(db):
     unprotected = {
         table
         for (table,) in query(
@@ -245,7 +253,7 @@ def test_every_table_the_web_role_can_use_is_under_row_level_security(db):
         )
     }
 
-    assert unprotected == set()
+    assert unprotected == NOT_TENANT_TABLES
 
 
 def test_an_identity_that_is_not_a_known_user_sees_nothing(db, two_companies):
@@ -303,3 +311,46 @@ def test_the_migration_refuses_to_continue_if_the_web_role_is_still_unsafe(db, u
 
 def test_the_web_role_created_by_the_migrations_has_only_safe_attributes(db):
     assert query(ROLE_ATTRIBUTES, [WEB_ROLE]) == [(False, False, False, False, False)]
+
+
+def test_a_migrating_role_that_is_not_a_superuser_can_run_the_role_step_against_a_safe_web_role(db):
+    """Changing the SUPERUSER attribute at all needs a superuser, so the step must not touch a safe role."""
+    with connection.cursor() as cursor:
+        cursor.execute("DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tmp_migrator') "
+                       "THEN CREATE ROLE tmp_migrator NOLOGIN CREATEROLE NOSUPERUSER; END IF; END $$")
+        cursor.execute("SET ROLE tmp_migrator")
+        try:
+            cursor.execute(role_migration.SECURE_ROLE)
+            cursor.execute(role_migration.VERIFY_ROLE)
+        finally:
+            cursor.execute("RESET ROLE")
+
+
+def test_a_session_that_django_no_longer_accepts_keeps_no_access_to_tenant_data(
+    probe_client, two_companies, as_production_connection
+):
+    acme, _ = two_companies
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
+    with as_production_connection():
+        probe_client.post("/login/", {"email": owner.email, "password": "unused-long-password"})
+        assert probe_client.get("/probe/").json()["companies"] == ["Acme Sdn Bhd"]
+
+    owner.set_password("a different long passphrase")  # as after a password reset
+    owner.save()
+
+    with as_production_connection():
+        assert probe_client.get("/probe/").json()["companies"] == []
+
+
+def test_a_deactivated_user_keeps_no_access_to_tenant_data(probe_client, two_companies, as_production_connection):
+    acme, _ = two_companies
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
+    with as_production_connection():
+        probe_client.post("/login/", {"email": owner.email, "password": "unused-long-password"})
+        assert probe_client.get("/probe/").json()["companies"] == ["Acme Sdn Bhd"]
+
+    owner.is_active = False
+    owner.save()
+
+    with as_production_connection():
+        assert probe_client.get("/probe/").json()["companies"] == []

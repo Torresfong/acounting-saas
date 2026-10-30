@@ -1,0 +1,18 @@
+{% load i18n %}<!doctype html>
+<html lang="{{ LANGUAGE_CODE }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% trans "Companies" %}</title>
+</head>
+<body>
+  <h1>{% trans "Companies" %}</h1>
+  <ul>
+    {% for access in accesses %}
+      <li><a href="/companies/{{ access.company.pk }}/">{{ access.company.name }}</a> ({{ access.get_role_display }})</li>
+    {% empty %}
+      <li>{% trans "You do not have access to any company yet." %}</li>
+    {% endfor %}
+  </ul>
+</body>
+</html>

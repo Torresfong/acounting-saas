@@ -7,5 +7,10 @@
 </head>
 <body>
   <h1>{% trans "Welcome" %}</h1>
+  <p>{% blocktrans with email=request.user.email %}Signed in as {{ email }}{% endblocktrans %}</p>
+  <form method="post" action="/logout/">
+    {% csrf_token %}
+    <button type="submit">{% trans "Sign out" %}</button>
+  </form>
 </body>
 </html>

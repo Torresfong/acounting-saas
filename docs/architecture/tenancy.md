@@ -24,14 +24,14 @@ The web role starts with access to nothing and there are no default privileges, 
 - Migrations create the `web` role without a login. If it already exists (roles are cluster-wide), they reset it to `NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS` and stop with an error unless those attributes hold. They must run as the table owner, never as `web`.
 - For production, the application should connect with a login role that is a member of `web` and owns nothing (`CREATE ROLE app LOGIN PASSWORD ... IN ROLE web`), while migrations run with the owner's credentials. The middleware also drops to `web` on every request, so a connection made with the owner's credentials (as in development and tests) still cannot skip row-level security while handling a request.
 - The user and session lookup that happens before the middleware runs as the connection's own role. Ticket 02b gives the user table its own policy and a narrow pre-authentication lookup function.
-- The web role cannot read the user, job or session tables yet, so a request cannot touch them until 02b and 02d open them with policies.
+- The web role reads only its own row of the user table and uses the session table (see the 02b section below); it still cannot reach jobs until 02d (#34).
 - A streaming response is read after the middleware returns, outside the web role and its transaction. Do not query tenant data lazily inside a streamed response.
 
 ## Threat model and limits
 
 - **The identity is a mutable session setting, and the role switch can be undone.** Any code running as `web` can execute `SELECT set_config('app.user_id', ...)` and so impersonate another user. It can also run `RESET ROLE`, which returns the session to the role the connection was made with, and what that role can do depends on what it is:
   - A **superuser** or a role with `BYPASSRLS` ignores row-level security entirely, `FORCE` or not. If the application connected as one, injected SQL could simply `RESET ROLE` and read every tenant's data.
-  - An ordinary **table owner** is subject to `FORCE ROW LEVEL SECURITY` like anyone else, so it does not see other companies' rows by default. It does keep DDL rights, so it can alter or drop the policies and disable row-level security, or grant itself access, and then read everything.
+  - An ordinary **table owner** is subject to `FORCE ROW LEVEL SECURITY` like anyone else on the tenant tables that later tickets add, so it does not see other companies' rows there by default. It keeps DDL rights, so it can alter or drop the policies and disable row-level security, or grant itself access, and then read everything. On `core_user`, `core_company`, `core_companyaccess` and the token and throttle tables it is already let through by the `definer_functions` policy (see 02b below), so it sees all their rows without any of that.
   - A login role that is only a member of `web` has nothing stronger to go back to, so `RESET ROLE` gains nothing. That is the production setup.
   In development and tests the connection is the owner's (and a superuser's in the Docker stack) and only the per-request switch protects tenant data. Row-level security protects against mistakes (a missing filter, a wrong query) and not against an attacker who can run arbitrary SQL as `web`.
 - **SQL injection is the main threat to this design.** An injected statement could impersonate another user. Defences: parameterized queries and the ORM only, no string-built SQL, no raw SQL that includes request data, review of any `.raw()` or `cursor.execute()` use. Row-level security backs these up; it does not replace them.
@@ -42,3 +42,61 @@ The web role starts with access to nothing and there are no default privileges, 
 ## Go-live prerequisite: production database login role
 
 This is not built in ticket 02a and is mandatory before any real client data is stored. Provisioning must create a login role for the application that is a member of `web` and nothing else (no superuser, no `BYPASSRLS`, no ownership of tables or schemas, no other role memberships), keep its credentials in the secrets service and out of the repository, and run migrations with a separate owner role. A check at deployment should confirm the application's connection is not a superuser, does not bypass row-level security and owns no tables. Until then the repository's development and test connections, which use the owner, must not be treated as production-safe.
+
+## Sign-in, invitations and the functions that run before anyone is identified (02b, #32)
+
+Implements D40 (2), (4), (5), (7) and D48 for staff and accountants. Owner self-registration is #67.
+
+**Users and roles.** `core.User` signs in with an email address (stored lowercase, unique ignoring case) and an Argon2 password. The role is on the `CompanyAccess` row, and a partial unique index allows one `owner` row per company. Owners and staff have one row; a firm accountant has one row per pilot company, added when the company is created (`core.services.create_company_with_owner`) or when the accountant is created (`manage.py create_accountant`). Accountants are never created or invited by a client (D48).
+
+**Who may do what.** `core.permissions` holds the action-level rules (D40 (4)): `ACTIONS` maps an action to the roles that may perform it, `require` raises 403 in a view, and `{% can "action" company as allowed %}` offers the same check in templates. Register a new protected action in `ACTIONS`. A company the user cannot reach is a 404, so its existence is not revealed.
+
+**Why functions.** Before anyone is signed in the web role has no identity, so row-level security shows it nothing. Sign-in, password reset and invitation acceptance therefore go through narrow `SECURITY DEFINER` functions owned by the table owner, each with a pinned `search_path`, executable by `web` only:
+
+| Function | Returns | Notes |
+|---|---|---|
+| `auth_lookup(email)` | id, password hash, active flag | exact match, case-insensitive; nothing else about the user |
+| `start_login_attempt`, `clear_login_failures` | allowed / nothing | counts an attempt before the password is checked; only a SHA-256 of the email is stored |
+| `create_password_reset`, `token_is_valid`, `complete_password_reset` | bool / user id | at most three links an hour per account |
+| `create_invitation` | whether one was created | checks inside the database that the signed-in user owns the company; the role is fixed to staff; at most 20 a day per company; an address that already has an account gets none and the caller is not told |
+| `accept_invitation` | user id | creates the user and the membership in one transaction |
+
+The web role has no direct access to `core_authtoken` or `core_loginfailure`, and may read only its own row of `core_user` (it needs the password hash to validate the session). It cannot create, change or delete users.
+
+**Forced row-level security and the owner.** `FORCE ROW LEVEL SECURITY` also hides rows from the table owner, and the functions run as the owner, so each table the functions touch has a `definer_functions` policy naming the migrating role (`core.rls.owner_policy_sql`). It opens nothing to `web` or to a login role that is a member of it. Verified against a non-superuser owner: the migrations run, and every function works under forced row-level security.
+
+**Identity and sessions.** The middleware takes the user id from the session and sets it as the database identity, then loads the user under that identity. If Django rejects the session (the password changed, or the user was deactivated), the identity is dropped again, so a stale session keeps no access to tenant data. Loading the user is itself a query that row-level security restricts, which is why the identity is set first. Sessions are stored in `django_session`, which the web role can use; it holds a session key and a signed blob naming a user id, no tenant data, and is the one listed exception to the rule that every table the web role can use is under row-level security. Django's `last_login` update is turned off, because the web role cannot write the user table and nobody is identified yet at sign-in; sign-ins belong in the audit trail (#33).
+
+**Throttling.** Five sign-in attempts for an address in fifteen minutes lock that address, including addresses with no account, so the lock does not reveal which exist. The address is reduced to its key inside the database with the same `lower()` the lookup uses, so every spelling that signs in as one account (upper case, the Turkish dotted İ) shares one count. Each attempt is counted under a per-address lock before the password is checked and a successful sign-in clears the count, so parallel requests cannot all pass the check. Known limits: anyone who knows an address can lock its owner out for fifteen minutes, and there is no limit per client address, because that needs the deployment's proxy settings to be trustworthy (go-live, #39).
+
+**Links.** Reset links last at most an hour and invitations at most a week; the functions cap the expiry whatever the caller passes. Tokens are random, stored only as a SHA-256 hash, single use, and indistinguishable when unknown, expired or used. A reset needs an active account. The functions accept only an Argon2 password hash. Tokens expired for more than thirty days are deleted whenever a new one is created. A password change ends the account's other sessions, because Django ties a session to a hash of the password. Links are built from `BASE_URL`, never from the request's Host header. Known limits: the reset form sends mail only for real accounts, so response time can reveal which addresses are registered, and three requests an hour per account can be used to delay that account's own reset. Both need a queue for outgoing mail (#27) to close.
+
+**Two-factor authentication** is a go-live blocker (D40 (7)) and is not built here. Sign-in ends in one function, `core.signin.complete_sign_in`, which is where it plugs in.
+
+**Not tenant tables.** `core_user`, `core_authtoken` and `core_loginfailure` have no company id. They are reached only through the functions above and, for the user's own row, the policy on `core_user`, so the standard tenant helper does not apply to them. The membership tables hold the company link.
+
+**Deployment settings that matter.** `ENVIRONMENT` must be set to something other than `development` in production: it turns on secure cookies and the `SECRET_KEY` check. HSTS, SSL redirects and the proxy header are not configured yet. All of this is part of the go-live work in #39.
+
+**Firm portal language.** The firm portal is English only (CLAUDE.md), but the sign-in and company pages are shared and follow the browser's language. Fixing an accountant's language belongs with the firm portal screens.
+
+**Firm accountants.** `User.is_accountant` marks a firm accountant for good. Only the operator command sets it. Access rows follow it: an accountant created before any company still receives every company created later, because company creation looks for the marker and not for existing access rows.
+
+## Threat model for the pre-sign-in functions (independent review of PR #68)
+
+The functions in the table above are executable by the web role, so what an attacker with arbitrary SQL as `web` can do through them is part of the threat model of D40 (3). Impersonating a signed-in user by setting `app.user_id` is the smaller part. The functions also let such an attacker create credentials that outlast the injection:
+
+- **Take over any account by email address alone.** `create_password_reset` followed by `complete_password_reset` sets a chosen password on an account, accountants included, with no identity and nothing logged. The caller supplies the token hash and receives the effect, so the link is no protection against someone who can call the functions directly.
+- **Create a staff user in a company** by setting `app.user_id` to an owner's id, creating an invitation and accepting it.
+- **Read every password hash** through `auth_lookup`, and every session key from `django_session`, for offline cracking and cookie theft.
+- **Learn which addresses are registered**, from the boolean results.
+
+What limits this: expiry is capped and only an Argon2 hash is accepted, so a junk hash cannot be planted; invitations are fixed to staff and capped at 20 a day; the functions cannot create an owner or an accountant; and the audit trail (#33) is to record sign-ins, resets and invitations. What does not change it: generating the token inside the database would not help, because the caller would receive it. Closing the exposure completely needs token minting and mail in a different trust domain from `web`. Until then the defences are parameterized ORM access only, review of every raw query, and two-factor authentication (D40 (7)), which is why it blocks go-live.
+
+**Roles and the owner.** A non-superuser table owner cannot `SET ROLE web` unless it is a member of `web`, so the middleware fails closed for it; the production login role is a member of `web` and not the owner. Migrations refuse to run if `web` is a member of any other role, and the definer functions use a search path that begins with `pg_catalog`.
+
+## Decisions on residual risk (product owner, 2026-10-30)
+
+- **Credential minting through the pre-sign-in functions stays open as an accepted residual risk** for the pilot build. It is not required to be closed before PR #68 merges. It is re-examined before go-live together with two-factor authentication.
+- **Two-factor authentication is not built now.** It is done before go-live (D40 (7)). Its absence does not block PR #68.
+- **A session security review is a go-live security requirement:** the session store the web role can read and write, session key handling (for example hashed keys or signed cookies), lifetime and idle timeout, and invalidation on password change and on sign-out everywhere.
+- **Migration 0003 was edited after it merged.** Django records only a migration's name, not its content, so an environment that applied the earlier version stays consistent and does not re-run it; it simply does not get the added role check. Verified by migrating a database with the earlier 0003 and then applying this branch: it upgrades without error and `makemigrations --check` is clean.

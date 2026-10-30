@@ -1,3 +1,4 @@
+from django.contrib.auth import SESSION_KEY
 from django.db import connection, transaction
 from psycopg.pq import TransactionStatus
 
@@ -26,13 +27,21 @@ class TenantContextMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        user = getattr(request, "user", None)
-        user_id = str(user.pk) if user is not None and user.is_authenticated else ""
+        # The identity comes from the session, not from loading the user: loading the user is itself a
+        # query that row-level security restricts, and it must run as the signed-in user.
+        session_user = request.session.get(SESSION_KEY, "") if hasattr(request, "session") else ""
+        user_id = str(session_user) if str(session_user).isdigit() else ""
 
         with transaction.atomic():
             with connection.cursor() as cursor:
                 cursor.execute(f"SET LOCAL ROLE {WEB_ROLE}")
                 cursor.execute("SELECT set_config(%s, %s, true)", [IDENTITY_SETTING, user_id])
+            if user_id and not request.user.is_authenticated:
+                # Django rejects a session after a password change or a deactivation only when the user is
+                # loaded, which happens here under the session's own identity. Drop the identity if it was
+                # rejected, so a stale session keeps no access to tenant data.
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT set_config(%s, '', true)", [IDENTITY_SETTING])
             response = self.get_response(request)
             if connection.connection.info.transaction_status == TransactionStatus.INERROR:
                 transaction.set_rollback(True)
