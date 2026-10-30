@@ -9,7 +9,7 @@ from core.rls import IDENTITY_FUNCTION, definer_function_sql
 
 CREATE_INVITATION = f"""
 CREATE FUNCTION create_invitation(p_token_hash text, p_email text, p_company bigint, p_expires timestamptz)
-RETURNS boolean LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS
+RETURNS boolean LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS
 $$
 BEGIN
     IF NOT EXISTS (
@@ -18,6 +18,7 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'only the owner of the company may invite' USING ERRCODE = '42501';
     END IF;
+    DELETE FROM core_authtoken WHERE expires_at < now() - interval '30 days';
     -- At most 20 invitations a day per company, so the form cannot be used to send mail in bulk.
     IF (SELECT count(*) FROM core_authtoken
         WHERE company_id = p_company AND purpose = 'invite' AND created_at > now() - interval '1 day') >= 20 THEN
@@ -29,7 +30,8 @@ BEGIN
         RETURN false;
     END IF;
     INSERT INTO core_authtoken (purpose, token_hash, email, company_id, role, user_id, expires_at, created_at)
-    VALUES ('invite', p_token_hash, lower(p_email), p_company, 'staff', NULL, p_expires, now());
+    VALUES ('invite', p_token_hash, lower(p_email), p_company, 'staff', NULL,
+            LEAST(p_expires, now() + interval '7 days'), now());
     RETURN true;
 END
 $$
@@ -37,7 +39,7 @@ $$
 
 ACCEPT_INVITATION = """
 CREATE FUNCTION accept_invitation(p_token_hash text, p_password_hash text) RETURNS bigint
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS
 $$
 DECLARE
     v_token bigint;
@@ -46,6 +48,9 @@ DECLARE
     v_role text;
     v_user bigint;
 BEGIN
+    IF p_password_hash !~ '^argon2[$]argon2(id|i|d)[$]v=' THEN
+        RAISE EXCEPTION 'not an Argon2 password hash' USING ERRCODE = '22023';
+    END IF;
     SELECT id, email, company_id, role INTO v_token, v_email, v_company, v_role FROM core_authtoken
     WHERE token_hash = p_token_hash AND purpose = 'invite' AND used_at IS NULL AND expires_at > now()
     FOR UPDATE;

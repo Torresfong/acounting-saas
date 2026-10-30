@@ -28,6 +28,9 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     email = models.EmailField(unique=True)
     is_active = models.BooleanField(default=True)
+    # Marks a firm accountant for good, so one created before any company still gets access to later ones.
+    # Set only by the operator command; the database default lets the SQL functions create users without it.
+    is_accountant = models.BooleanField(default=False, db_default=False)
     date_joined = models.DateTimeField(auto_now_add=True)
 
     objects = UserManager()

@@ -33,6 +33,11 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Database role {WEB_ROLE} has unsafe attributes; it must be NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB';
     END IF;
+    IF EXISTS (
+        SELECT FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member WHERE r.rolname = '{WEB_ROLE}'
+    ) THEN
+        RAISE EXCEPTION 'Database role {WEB_ROLE} is a member of other roles; it must not inherit their privileges';
+    END IF;
 END
 $$
 """

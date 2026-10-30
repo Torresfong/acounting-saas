@@ -19,7 +19,7 @@ def _require_new_address(email):
 
 
 def _accountants():
-    return get_user_model().objects.filter(company_access__role=CompanyAccess.ACCOUNTANT).distinct()
+    return get_user_model().objects.filter(is_accountant=True)
 
 
 @transaction.atomic
@@ -40,7 +40,7 @@ def create_company_with_owner(name, owner_email, owner_password):
 def create_accountant(email):
     """A firm accountant with access to every pilot company and no usable password until they choose one."""
     _require_new_address(email)
-    accountant = get_user_model().objects.create_user(email, password=None)
+    accountant = get_user_model().objects.create_user(email, password=None, is_accountant=True)
     CompanyAccess.objects.bulk_create(
         CompanyAccess(user=accountant, company=company, role=CompanyAccess.ACCOUNTANT)
         for company in Company.objects.all()

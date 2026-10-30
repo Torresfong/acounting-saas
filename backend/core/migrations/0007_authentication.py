@@ -8,32 +8,36 @@ from core.rls import IDENTITY_FUNCTION, WEB_ROLE, definer_function_sql, owner_po
 
 LOOKUP = """
 CREATE FUNCTION auth_lookup(p_email text) RETURNS TABLE (id bigint, password text, is_active boolean)
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS
 $$ SELECT u.id, u.password, u.is_active FROM core_user u WHERE lower(u.email) = lower(p_email) LIMIT 1 $$
 """
 
 START_ATTEMPT = """
-CREATE FUNCTION start_login_attempt(p_hash text, p_window interval, p_max integer) RETURNS boolean
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS
+CREATE FUNCTION start_login_attempt(p_email text, p_window interval, p_max integer) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS
 $$
+DECLARE
+    -- The key is worked out here, with the same lower() that auth_lookup uses, so every spelling of an
+    -- address that signs in as one account is counted as one address.
+    v_key text := encode(sha256(convert_to(lower(btrim(p_email)), 'UTF8')), 'hex');
 BEGIN
     -- Attempts for one address are serialised until the request ends, so parallel requests cannot all
     -- pass the check before any of them is counted.
-    PERFORM pg_advisory_xact_lock(hashtext(p_hash));
+    PERFORM pg_advisory_xact_lock(hashtext(v_key));
     DELETE FROM core_loginfailure WHERE at < now() - interval '1 day';
-    IF (SELECT count(*) FROM core_loginfailure WHERE email_hash = p_hash AND at > now() - p_window) >= p_max THEN
+    IF (SELECT count(*) FROM core_loginfailure WHERE email_hash = v_key AND at > now() - p_window) >= p_max THEN
         RETURN false;
     END IF;
-    INSERT INTO core_loginfailure (email_hash, at) VALUES (p_hash, now());
+    INSERT INTO core_loginfailure (email_hash, at) VALUES (v_key, now());
     RETURN true;
 END
 $$
 """
 
 CLEAR_FAILURES = """
-CREATE FUNCTION clear_login_failures(p_hash text) RETURNS void
-LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS
-$$ DELETE FROM core_loginfailure WHERE email_hash = p_hash $$
+CREATE FUNCTION clear_login_failures(p_email text) RETURNS void
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS
+$$ DELETE FROM core_loginfailure WHERE email_hash = encode(sha256(convert_to(lower(btrim(p_email)), 'UTF8')), 'hex') $$
 """
 
 FUNCTIONS = {

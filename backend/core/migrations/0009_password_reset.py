@@ -7,7 +7,7 @@ from core.rls import definer_function_sql, owner_policy_sql
 
 TOKEN_IS_VALID = """
 CREATE FUNCTION token_is_valid(p_token_hash text, p_purpose text) RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS
 $$
     SELECT EXISTS (
         SELECT 1 FROM core_authtoken
@@ -18,11 +18,12 @@ $$
 
 CREATE_PASSWORD_RESET = """
 CREATE FUNCTION create_password_reset(p_token_hash text, p_email text, p_expires timestamptz) RETURNS boolean
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS
 $$
 DECLARE
     v_user bigint;
 BEGIN
+    DELETE FROM core_authtoken WHERE expires_at < now() - interval '30 days';
     SELECT id INTO v_user FROM core_user WHERE lower(email) = lower(p_email) AND is_active;
     IF v_user IS NULL THEN
         RETURN false;
@@ -33,7 +34,7 @@ BEGIN
         RETURN false;
     END IF;
     INSERT INTO core_authtoken (purpose, token_hash, email, role, user_id, expires_at, created_at)
-    VALUES ('reset', p_token_hash, lower(p_email), '', v_user, p_expires, now());
+    VALUES ('reset', p_token_hash, lower(p_email), '', v_user, LEAST(p_expires, now() + interval '1 hour'), now());
     RETURN true;
 END
 $$
@@ -41,12 +42,15 @@ $$
 
 COMPLETE_PASSWORD_RESET = """
 CREATE FUNCTION complete_password_reset(p_token_hash text, p_password_hash text) RETURNS bigint
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp AS
 $$
 DECLARE
     v_token bigint;
     v_user bigint;
 BEGIN
+    IF p_password_hash !~ '^argon2[$]argon2(id|i|d)[$]v=' THEN
+        RAISE EXCEPTION 'not an Argon2 password hash' USING ERRCODE = '22023';
+    END IF;
     SELECT t.id, t.user_id INTO v_token, v_user
     FROM core_authtoken t JOIN core_user u ON u.id = t.user_id
     WHERE t.token_hash = p_token_hash AND t.purpose = 'reset' AND t.used_at IS NULL AND t.expires_at > now()
