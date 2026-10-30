@@ -5,10 +5,10 @@ from django.db import connection
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.translation import gettext as _
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_POST, require_safe
 
-from . import permissions, throttle, tokens
-from .models import AuthToken, CompanyAccess
+from . import audit, permissions, throttle, tokens
+from .models import AuditEntry, AuthToken, CompanyAccess
 from .signin import complete_sign_in
 
 
@@ -39,16 +39,20 @@ def sign_in(request):
 
     user = authenticate(request, email=email, password=password)
     if user is None:
+        audit.record_auth_event(AuditEntry.LOGIN_FAILED, email)
         context["error"] = _("The email address or password is not correct.")
         return render(request, "login.html", context)
 
     throttle.clear(email)
     complete_sign_in(request, user)
+    audit.record_auth_event(AuditEntry.LOGIN, email)
     return redirect("/")
 
 
 @require_POST
 def sign_out(request):
+    if request.user.is_authenticated:
+        audit.record_auth_event(AuditEntry.LOGOUT)
     logout(request)
     return redirect("/login/")
 
@@ -146,3 +150,28 @@ def accept_invitation(request, token):
     return _choose_password(
         request, token, AuthToken.INVITE, _("Choose your password"), tokens.accept_invitation
     )
+
+
+ENTRIES_SHOWN = 200
+
+
+@require_safe
+def audit_trail(request, pk):
+    """The company's full trail: the owner and the firm's accountants. Staff see their own activity instead."""
+    if not request.user.is_authenticated:
+        return HttpResponse(status=401)
+    access = _own_access(request, pk)
+    permissions.require(request.user, "view_audit_trail", access.company)
+    entries = AuditEntry.objects.filter(company=access.company)[:ENTRIES_SHOWN]
+    return render(request, "audit.html", {"company": access.company, "entries": entries, "heading": _("Audit trail")})
+
+
+@require_safe
+def my_activity(request, pk):
+    """What the signed-in user themself has done in the company. Company isolation is row-level security."""
+    if not request.user.is_authenticated:
+        return HttpResponse(status=401)
+    access = _own_access(request, pk)
+    permissions.require(request.user, "view_own_activity", access.company)
+    entries = AuditEntry.objects.filter(company=access.company, actor_id=request.user.pk)[:ENTRIES_SHOWN]
+    return render(request, "audit.html", {"company": access.company, "entries": entries, "heading": _("My activity")})

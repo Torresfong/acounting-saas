@@ -1,0 +1,37 @@
+{% load i18n %}<!doctype html>
+<html lang="{{ LANGUAGE_CODE }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ heading }}</title>
+</head>
+<body>
+  <h1>{{ heading }}</h1>
+  <p>{{ company.name }}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>{% trans "When" %}</th>
+        <th>{% trans "Who" %}</th>
+        <th>{% trans "What" %}</th>
+        <th>{% trans "Record" %}</th>
+        <th>{% trans "Fields changed" %}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in entries %}
+        <tr>
+          <td>{{ entry.occurred_at|date:"Y-m-d H:i:s" }}</td>
+          <td>{{ entry.actor_email|default:"-" }}</td>
+          <td>{{ entry.get_action_display }}</td>
+          <td>{% if entry.target_type %}{{ entry.target_type }} {{ entry.target_id }}{% endif %}</td>
+          <td>{{ entry.changed_fields|join:", " }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5">{% trans "Nothing has been recorded yet." %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p><a href="/companies/{{ company.pk }}/">{{ company.name }}</a></p>
+</body>
+</html>

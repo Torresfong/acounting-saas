@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-30 14:05+0800\n"
+"POT-Creation-Date: 2026-10-30 14:56+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -18,17 +18,67 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: .\core\models.py:63
+#: .\core\models.py:66
 msgid "Client owner"
 msgstr "客户所有者"
 
-#: .\core\models.py:63
+#: .\core\models.py:66
 msgid "Client staff"
 msgstr "客户员工"
 
-#: .\core\models.py:63
+#: .\core\models.py:66
 msgid "Firm accountant"
 msgstr "事务所会计师"
+
+#: .\core\models.py:161
+#| msgid "Sign in"
+msgid "Signed in"
+msgstr "已登录"
+
+#: .\core\models.py:162
+msgid "Failed sign-in"
+msgstr "登录失败"
+
+#: .\core\models.py:163
+#| msgid "Sign out"
+msgid "Signed out"
+msgstr "已退出登录"
+
+#: .\core\models.py:164
+msgid "Created"
+msgstr "已创建"
+
+#: .\core\models.py:165
+msgid "Updated"
+msgstr "已更新"
+
+#: .\core\models.py:166
+msgid "Deleted"
+msgstr "已删除"
+
+#: .\core\templates\audit.html:14
+msgid "When"
+msgstr "时间"
+
+#: .\core\templates\audit.html:15
+msgid "Who"
+msgstr "操作人"
+
+#: .\core\templates\audit.html:16
+msgid "What"
+msgstr "操作"
+
+#: .\core\templates\audit.html:17
+msgid "Record"
+msgstr "记录"
+
+#: .\core\templates\audit.html:18
+msgid "Fields changed"
+msgstr "变更字段"
+
+#: .\core\templates\audit.html:31
+msgid "Nothing has been recorded yet."
+msgstr "暂无记录。"
 
 #: .\core\templates\companies.html:6 .\core\templates\companies.html:9
 msgid "Companies"
@@ -43,20 +93,28 @@ msgstr "您还没有任何公司的访问权限。"
 msgid "Your role: %(role)s"
 msgstr "您的角色：%(role)s"
 
-#: .\core\templates\company.html:15
+#: .\core\templates\company.html:15 .\core\views.py:166
+msgid "Audit trail"
+msgstr "审计记录"
+
+#: .\core\templates\company.html:16 .\core\views.py:177
+msgid "My activity"
+msgstr "我的操作记录"
+
+#: .\core\templates\company.html:20
 msgid "Invite a colleague"
 msgstr "邀请同事"
 
-#: .\core\templates\company.html:18 .\core\templates\login.html:13
+#: .\core\templates\company.html:23 .\core\templates\login.html:13
 #: .\core\templates\password_reset.html:15
 msgid "Email address"
 msgstr "电子邮件地址"
 
-#: .\core\templates\company.html:19
+#: .\core\templates\company.html:24
 msgid "Send invitation"
 msgstr "发送邀请"
 
-#: .\core\templates\company.html:22
+#: .\core\templates\company.html:27
 msgid "All companies"
 msgstr "所有公司"
 
@@ -157,31 +215,30 @@ msgstr ""
 msgid "Too many failed attempts. Try again in a few minutes."
 msgstr "失败次数过多，请几分钟后再试。"
 
-#: .\core\views.py:42
+#: .\core\views.py:43
 msgid "The email address or password is not correct."
 msgstr "电子邮件地址或密码不正确。"
 
-#: .\core\views.py:66
+#: .\core\views.py:70
 msgid "The two passwords do not match."
 msgstr "两次输入的密码不一致。"
 
-#: .\core\views.py:93
+#: .\core\views.py:97
 msgid "Choose a new password"
 msgstr "设置新密码"
 
-#: .\core\views.py:113
+#: .\core\views.py:117
 msgid "Invitation sent."
 msgstr "邀请已发送。"
 
-#: .\core\views.py:136
-#| msgid "Email address"
+#: .\core\views.py:140
 msgid "Enter a valid email address."
 msgstr "请输入有效的电子邮件地址。"
 
-#: .\core\views.py:141
+#: .\core\views.py:145
 msgid "Too many invitations today. Try again tomorrow."
 msgstr "今天发送的邀请过多，请明天再试。"
 
-#: .\core\views.py:147
+#: .\core\views.py:151
 msgid "Choose your password"
 msgstr "设置您的密码"

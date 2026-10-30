@@ -70,3 +70,24 @@ def as_production_connection(db):
 def base_url(settings):
     """Links in emails are built from BASE_URL, not from the request, so tests pin it to the test client's host."""
     settings.BASE_URL = "http://testserver"
+
+
+@pytest.fixture
+def world(db):
+    """Acme (owner, staff), Beta (owner), and a firm accountant on both. Passwords are `factories.PASSWORD`."""
+    from core.models import CompanyAccess
+    from core.tests.factories import make_company, make_member
+
+    acme, beta = make_company("Acme Sdn Bhd"), make_company("Beta Trading")
+    accountant = make_member("accountant@firm.example", acme, CompanyAccess.ACCOUNTANT)
+    CompanyAccess.objects.create(user=accountant, company=beta, role=CompanyAccess.ACCOUNTANT)
+    accountant.is_accountant = True
+    accountant.save()
+    return {
+        "acme": acme,
+        "beta": beta,
+        "acme_owner": make_member("owner@acme.example", acme, CompanyAccess.OWNER),
+        "acme_staff": make_member("staff@acme.example", acme, CompanyAccess.STAFF),
+        "beta_owner": make_member("owner@beta.example", beta, CompanyAccess.OWNER),
+        "accountant": accountant,
+    }

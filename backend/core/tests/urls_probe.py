@@ -30,4 +30,36 @@ def boom(request):
         cursor.execute("SELECT 1 / 0")
 
 
-urlpatterns = [path("probe/", probe), path("boom/", boom), path("", include("config.urls"))]
+def _run(sql, params):
+    with connection.cursor() as cursor:
+        cursor.execute(sql, params)
+        return cursor.fetchone()
+
+
+def note_create(request):
+    """Writes a record the way a business view will: as the signed-in user, on a table with the audit trigger."""
+    row = _run(
+        "INSERT INTO probe_note (company_id, body) VALUES (%s, %s) RETURNING id",
+        [int(request.POST["company"]), request.POST["body"]],
+    )
+    return JsonResponse({"id": row[0]})
+
+
+def note_update(request, pk):
+    _run("UPDATE probe_note SET body = %s WHERE id = %s RETURNING id", [request.POST["body"], pk])
+    return JsonResponse({"id": pk})
+
+
+def note_delete(request, pk):
+    _run("DELETE FROM probe_note WHERE id = %s RETURNING id", [pk])
+    return JsonResponse({"id": pk})
+
+
+urlpatterns = [
+    path("probe/", probe),
+    path("boom/", boom),
+    path("notes/", note_create),
+    path("notes/<int:pk>/update/", note_update),
+    path("notes/<int:pk>/delete/", note_delete),
+    path("", include("config.urls")),
+]
