@@ -1,6 +1,6 @@
 from django.db import migrations
 
-from core.rls import IDENTITY_FUNCTION, WEB_ROLE
+from core.rls import IDENTITY_FUNCTION, definer_function_sql
 
 # Invitations (D40 (5), D48). Creating one checks, inside the database, that the signed-in user owns the
 # company, so the rule does not rest on the view alone; the role of the invitee is fixed to staff here, not
@@ -9,7 +9,7 @@ from core.rls import IDENTITY_FUNCTION, WEB_ROLE
 
 CREATE_INVITATION = f"""
 CREATE FUNCTION create_invitation(p_token_hash text, p_email text, p_company bigint, p_expires timestamptz)
-RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS
+RETURNS boolean LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS
 $$
 BEGIN
     IF NOT EXISTS (
@@ -18,11 +18,19 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'only the owner of the company may invite' USING ERRCODE = '42501';
     END IF;
+    -- At most 20 invitations a day per company, so the form cannot be used to send mail in bulk.
+    IF (SELECT count(*) FROM core_authtoken
+        WHERE company_id = p_company AND purpose = 'invite' AND created_at > now() - interval '1 day') >= 20 THEN
+        RAISE EXCEPTION 'too many invitations today' USING ERRCODE = '54000';
+    END IF;
+    -- An address that already has an account gets no invitation, and the caller is not told, so an owner
+    -- cannot use the form to find out who is registered with another company.
     IF EXISTS (SELECT 1 FROM core_user WHERE lower(email) = lower(p_email)) THEN
-        RAISE EXCEPTION 'that address already has an account' USING ERRCODE = '23505';
+        RETURN false;
     END IF;
     INSERT INTO core_authtoken (purpose, token_hash, email, company_id, role, user_id, expires_at, created_at)
     VALUES ('invite', p_token_hash, lower(p_email), p_company, 'staff', NULL, p_expires, now());
+    RETURN true;
 END
 $$
 """
@@ -60,12 +68,7 @@ FUNCTIONS = {
     "accept_invitation(text, text)": ACCEPT_INVITATION,
 }
 
-FORWARD = []
-REVERSE = []
-for signature, create in FUNCTIONS.items():
-    FORWARD += [create, f"REVOKE ALL ON FUNCTION {signature} FROM PUBLIC", f"GRANT EXECUTE ON FUNCTION {signature} TO {WEB_ROLE}"]
-    REVERSE.append(f"DROP FUNCTION IF EXISTS {signature}")
-
+FORWARD, REVERSE = definer_function_sql(FUNCTIONS)
 
 class Migration(migrations.Migration):
     dependencies = [("core", "0009_password_reset")]

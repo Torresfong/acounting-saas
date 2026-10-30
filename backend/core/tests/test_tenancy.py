@@ -324,3 +324,33 @@ def test_a_migrating_role_that_is_not_a_superuser_can_run_the_role_step_against_
             cursor.execute(role_migration.VERIFY_ROLE)
         finally:
             cursor.execute("RESET ROLE")
+
+
+def test_a_session_that_django_no_longer_accepts_keeps_no_access_to_tenant_data(
+    probe_client, two_companies, as_production_connection
+):
+    acme, _ = two_companies
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
+    with as_production_connection():
+        probe_client.post("/login/", {"email": owner.email, "password": "unused-long-password"})
+        assert probe_client.get("/probe/").json()["companies"] == ["Acme Sdn Bhd"]
+
+    owner.set_password("a different long passphrase")  # as after a password reset
+    owner.save()
+
+    with as_production_connection():
+        assert probe_client.get("/probe/").json()["companies"] == []
+
+
+def test_a_deactivated_user_keeps_no_access_to_tenant_data(probe_client, two_companies, as_production_connection):
+    acme, _ = two_companies
+    owner = member("acme-owner", acme, CompanyAccess.OWNER)
+    with as_production_connection():
+        probe_client.post("/login/", {"email": owner.email, "password": "unused-long-password"})
+        assert probe_client.get("/probe/").json()["companies"] == ["Acme Sdn Bhd"]
+
+    owner.is_active = False
+    owner.save()
+
+    with as_production_connection():
+        assert probe_client.get("/probe/").json()["companies"] == []

@@ -1,6 +1,11 @@
-import pytest
+from datetime import timedelta
 
-from core.models import CompanyAccess
+import pytest
+from django.core.management import call_command
+from django.utils import timezone
+
+from core import throttle
+from core.models import CompanyAccess, LoginFailure
 
 from .factories import PASSWORD, make_company, make_member
 
@@ -98,12 +103,6 @@ def test_failed_attempts_on_one_address_do_not_lock_another(client, acme_owner, 
 
 
 def test_the_lock_ends_after_the_window(client, acme_owner, as_production_connection):
-    from datetime import timedelta
-
-    from django.utils import timezone
-
-    from core.models import LoginFailure
-
     with as_production_connection():
         fail_times(client, "owner@acme.example", 5)
     LoginFailure.objects.update(at=timezone.now() - timedelta(minutes=16))
@@ -123,8 +122,6 @@ def test_a_successful_sign_in_resets_the_count(client, acme_owner, as_production
 
 
 def test_failed_attempts_are_stored_without_the_email_address(client, acme_owner, as_production_connection):
-    from core.models import LoginFailure
-
     with as_production_connection():
         fail_times(client, "Owner@Acme.example", 1)
 
@@ -137,3 +134,22 @@ def test_throttling_applies_to_addresses_that_have_no_account_too(client, db, as
         fail_times(client, "nobody@acme.example", 5)
 
         assert sign_in(client, "nobody@acme.example", PASSWORD).status_code == 429
+
+
+def test_the_sixth_attempt_for_an_address_is_refused_and_a_clear_resets_the_count(db):
+    assert [throttle.allow_attempt("owner@acme.example") for _ in range(6)] == [True] * 5 + [False]
+
+    throttle.clear("owner@acme.example")
+
+    assert throttle.allow_attempt("owner@acme.example")
+
+
+def test_an_accountant_who_has_not_chosen_a_password_cannot_sign_in(client, db, fake_ports, as_production_connection):
+    make_company()
+    call_command("create_accountant", "accountant@firm.example")
+
+    with as_production_connection():
+        response = sign_in(client, "accountant@firm.example", "")
+        guessed = sign_in(client, "accountant@firm.example", "anything at all")
+
+    assert response.status_code == guessed.status_code == 200

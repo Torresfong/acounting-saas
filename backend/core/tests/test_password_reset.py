@@ -2,6 +2,7 @@ import re
 from datetime import timedelta
 
 import pytest
+from django.test import Client
 from django.utils import timezone
 
 from core.models import AuthToken, CompanyAccess
@@ -110,8 +111,6 @@ def test_a_weak_password_is_refused_and_the_link_still_works(client, acme_owner,
 def test_a_reset_signs_out_sessions_opened_with_the_old_password(
     client, django_assert_num_queries, acme_owner, fake_ports, as_production_connection
 ):
-    from django.test import Client
-
     other_device = Client()
     with as_production_connection():
         sign_in(other_device, "owner@acme.example", PASSWORD)
@@ -129,3 +128,20 @@ def test_reset_requests_for_one_address_are_limited(client, acme_owner, fake_por
             request_reset(client, "owner@acme.example")
 
     assert len(fake_ports.email.sent) == 3
+
+
+def test_a_link_issued_before_the_account_was_deactivated_no_longer_works(
+    client, acme_owner, fake_ports, as_production_connection
+):
+    with as_production_connection():
+        request_reset(client, "owner@acme.example")
+    link = reset_link(fake_ports)
+    acme_owner.is_active = False
+    acme_owner.save()
+
+    with as_production_connection():
+        assert client.get(link).status_code == 200  # the link itself is still valid
+        assert client.post(link, {"password": NEW_PASSWORD, "confirm": NEW_PASSWORD}).status_code == 410
+
+    acme_owner.refresh_from_db()
+    assert acme_owner.check_password(PASSWORD)

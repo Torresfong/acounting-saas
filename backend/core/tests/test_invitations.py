@@ -2,7 +2,7 @@ import re
 from datetime import timedelta
 
 import pytest
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError, connection, transaction
 from django.test import Client
 from django.utils import timezone
 
@@ -68,13 +68,50 @@ def test_an_owner_cannot_invite_into_another_company(client, world, fake_ports, 
     assert fake_ports.email.sent == []
 
 
-def test_an_address_that_already_has_an_account_is_not_invited(client, world, fake_ports, as_production_connection):
+def test_an_address_that_already_has_an_account_gets_no_email_and_the_owner_is_not_told(
+    client, world, fake_ports, as_production_connection
+):
     with as_production_connection():
         sign_in(client, world["acme_owner"])
-        response = invite(client, world["acme"], "OWNER@beta.example")
+        taken = invite(client, world["acme"], "OWNER@beta.example")
+        fresh = invite(client, world["acme"], "fresh@acme.example")
 
-    assert response.status_code == 200
-    assert fake_ports.email.sent == []
+    assert taken.status_code == fresh.status_code == 302 and taken["Location"] == fresh["Location"]
+    assert [mail["to"] for mail in fake_ports.email.sent] == ["fresh@acme.example"]
+
+
+def test_a_malformed_address_is_refused(client, world, fake_ports, as_production_connection):
+    with as_production_connection():
+        sign_in(client, world["acme_owner"])
+        response = invite(client, world["acme"], "not-an-address")
+
+    assert response.status_code == 200 and fake_ports.email.sent == []
+
+
+def test_a_company_can_send_twenty_invitations_a_day_and_no_more(client, world, fake_ports, as_production_connection):
+    with as_production_connection():
+        sign_in(client, world["acme_owner"])
+        for number in range(20):
+            assert invite(client, world["acme"], f"person{number}@acme.example").status_code == 302
+        response = invite(client, world["acme"], "one.too.many@acme.example")
+
+    assert response.status_code == 200 and "Too many invitations" in response.content.decode()
+    assert len(fake_ports.email.sent) == 20
+
+
+def test_links_point_at_the_configured_address_even_if_the_request_names_another_host(
+    client, world, fake_ports, settings, as_production_connection
+):
+    settings.ALLOWED_HOSTS = ["testserver", "evil.example"]
+    settings.BASE_URL = "https://app.example"
+    with as_production_connection():
+        sign_in(client, world["acme_owner"])
+        client.post(
+            f"/companies/{world['acme'].pk}/invite/", {"email": "new@acme.example"}, headers={"host": "evil.example"}
+        )
+
+    body = fake_ports.email.sent[0]["body"]
+    assert "https://app.example/accept/" in body and "evil.example" not in body
 
 
 def test_the_invitee_chooses_a_password_and_joins_as_staff(client, world, fake_ports, as_production_connection):
@@ -150,8 +187,6 @@ def test_the_invitation_token_is_stored_only_as_a_hash(client, world, fake_ports
 
 
 def test_the_database_refuses_an_invitation_from_someone_who_is_not_the_owner(world, as_user):
-    from django.db import connection
-
     with as_user(world["acme_staff"]), connection.cursor() as cursor:
         with pytest.raises(DatabaseError), transaction.atomic():
             cursor.execute(
@@ -161,8 +196,6 @@ def test_the_database_refuses_an_invitation_from_someone_who_is_not_the_owner(wo
 
 
 def test_the_database_refuses_an_invitation_into_a_company_the_caller_does_not_own(world, as_user):
-    from django.db import connection
-
     with as_user(world["beta_owner"]), connection.cursor() as cursor:
         with pytest.raises(DatabaseError), transaction.atomic():
             cursor.execute(

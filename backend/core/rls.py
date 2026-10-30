@@ -54,3 +54,19 @@ def owner_policy_sql(table):
         f"'CREATE POLICY definer_functions ON {table} TO %I USING (true) WITH CHECK (true)', current_user); "
         "END $$"
     ]
+
+
+def definer_function_sql(functions):
+    """Forward and reverse SQL for SECURITY DEFINER functions: create each, close it to everyone, open it to `web`.
+
+    `functions` maps a signature such as "auth_lookup(text)" to its CREATE FUNCTION statement.
+    """
+    forward, reverse = [], []
+    for signature, create in functions.items():
+        forward += [
+            create,
+            f"REVOKE ALL ON FUNCTION {signature} FROM PUBLIC",
+            f"GRANT EXECUTE ON FUNCTION {signature} TO {WEB_ROLE}",
+        ]
+        reverse.insert(0, f"DROP FUNCTION IF EXISTS {signature}")
+    return forward, reverse

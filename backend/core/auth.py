@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.backends import BaseBackend
-from django.contrib.auth.hashers import check_password, make_password
+from django.contrib.auth.hashers import check_password, is_password_usable, make_password
 from django.db import connection
 
 # Verified against when the email is unknown, so an unknown address costs the same time as a wrong password.
@@ -20,7 +20,8 @@ class EmailBackend(BaseBackend):
         with connection.cursor() as cursor:
             cursor.execute("SELECT id, password, is_active FROM auth_lookup(%s)", [email])
             row = cursor.fetchone()
-        if row is None:
+        if row is None or not is_password_usable(row[1]):
+            # An unknown address and an account with no password yet cost as much as a wrong password.
             check_password(password, _DUMMY_HASH)
             return None
         user_id, encoded, is_active = row

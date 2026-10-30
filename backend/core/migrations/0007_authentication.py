@@ -1,6 +1,6 @@
 from django.db import migrations
 
-from core.rls import IDENTITY_FUNCTION, WEB_ROLE, owner_policy_sql
+from core.rls import IDENTITY_FUNCTION, WEB_ROLE, definer_function_sql, owner_policy_sql
 
 # Functions that run before anyone is signed in (D40 (2)). Each is SECURITY DEFINER, so it runs as the
 # table owner, with a pinned search path, and each returns only what its caller needs. The web role may
@@ -12,18 +12,21 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS
 $$ SELECT u.id, u.password, u.is_active FROM core_user u WHERE lower(u.email) = lower(p_email) LIMIT 1 $$
 """
 
-FAILURES_IN_WINDOW = """
-CREATE FUNCTION login_failures_in_window(p_hash text, p_window interval) RETURNS integer
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS
-$$ SELECT count(*)::integer FROM core_loginfailure WHERE email_hash = p_hash AND at > now() - p_window $$
-"""
-
-RECORD_FAILURE = """
-CREATE FUNCTION record_login_failure(p_hash text) RETURNS void
-LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS
+START_ATTEMPT = """
+CREATE FUNCTION start_login_attempt(p_hash text, p_window interval, p_max integer) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS
 $$
+BEGIN
+    -- Attempts for one address are serialised until the request ends, so parallel requests cannot all
+    -- pass the check before any of them is counted.
+    PERFORM pg_advisory_xact_lock(hashtext(p_hash));
     DELETE FROM core_loginfailure WHERE at < now() - interval '1 day';
+    IF (SELECT count(*) FROM core_loginfailure WHERE email_hash = p_hash AND at > now() - p_window) >= p_max THEN
+        RETURN false;
+    END IF;
     INSERT INTO core_loginfailure (email_hash, at) VALUES (p_hash, now());
+    RETURN true;
+END
 $$
 """
 
@@ -35,18 +38,14 @@ $$ DELETE FROM core_loginfailure WHERE email_hash = p_hash $$
 
 FUNCTIONS = {
     "auth_lookup(text)": LOOKUP,
-    "login_failures_in_window(text, interval)": FAILURES_IN_WINDOW,
-    "record_login_failure(text)": RECORD_FAILURE,
+    "start_login_attempt(text, interval, integer)": START_ATTEMPT,
     "clear_login_failures(text)": CLEAR_FAILURES,
 }
 
-FORWARD = []
-REVERSE = []
-for signature, create in FUNCTIONS.items():
-    FORWARD += [create, f"REVOKE ALL ON FUNCTION {signature} FROM PUBLIC", f"GRANT EXECUTE ON FUNCTION {signature} TO {WEB_ROLE}"]
-    REVERSE.append(f"DROP FUNCTION IF EXISTS {signature}")
+FUNCTION_FORWARD, FUNCTION_REVERSE = definer_function_sql(FUNCTIONS)
 
-FORWARD += [
+FORWARD = [
+    *FUNCTION_FORWARD,
     # Sessions are served by the application's own role, so the web role needs its table. It holds a session
     # key and a signed blob that names a user id, and no tenant data.
     f"GRANT SELECT, INSERT, UPDATE, DELETE ON django_session TO {WEB_ROLE}",
@@ -66,7 +65,8 @@ FORWARD += [
     *owner_policy_sql("core_loginfailure"),
 ]
 
-REVERSE += [
+REVERSE = [
+    *FUNCTION_REVERSE,
     "DROP POLICY IF EXISTS definer_functions ON core_loginfailure",
     "ALTER TABLE core_loginfailure DISABLE ROW LEVEL SECURITY",
     "DROP POLICY IF EXISTS definer_functions ON core_companyaccess",
@@ -77,7 +77,6 @@ REVERSE += [
     f"REVOKE ALL ON core_user FROM {WEB_ROLE}",
     f"REVOKE ALL ON django_session FROM {WEB_ROLE}",
 ]
-REVERSE.reverse()
 
 
 class Migration(migrations.Migration):

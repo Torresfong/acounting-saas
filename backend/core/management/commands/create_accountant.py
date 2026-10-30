@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from core import services, tokens
@@ -18,6 +17,5 @@ class Command(BaseCommand):
             accountant = services.create_accountant(email)
         except services.EmailInUse as error:
             raise CommandError("That address already has an account.") from error
-        base = settings.BASE_URL.rstrip("/")
-        tokens.request_password_reset(accountant.email, lambda raw: f"{base}/reset/{raw}/")
+        tokens.request_password_reset(accountant.email)
         self.stdout.write(f"Created accountant {accountant.email} and emailed a password link.")

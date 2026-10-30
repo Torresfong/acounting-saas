@@ -1,7 +1,8 @@
-"""Single-use, expiring links for password setup and reset (D40 (5)).
+"""Single-use, expiring links for password reset and invitations (D40 (5), D48).
 
 The token is random and only its SHA-256 hash is stored. Everything that runs before anyone is signed in
-goes through SECURITY DEFINER functions (D40 (2)).
+goes through SECURITY DEFINER functions (D40 (2)). Links are built from `settings.BASE_URL`, never from the
+request's Host header, so a forged header cannot point an emailed link at another site.
 """
 
 import hashlib
@@ -10,15 +11,20 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
-from django.db import DatabaseError, connection, transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from . import ports
+from .db import scalar
 
 
 class InvalidLink(Exception):
     """The link is unknown, expired or already used. The three cases are deliberately not told apart."""
+
+
+class TooManyInvitations(Exception):
+    """The company has reached its daily limit of invitations."""
 
 
 def new_token():
@@ -30,27 +36,25 @@ def hash_token(raw):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def _scalar(sql, params):
-    with connection.cursor() as cursor:
-        cursor.execute(sql, params)
-        return cursor.fetchone()[0]
+def link(path, raw):
+    return f"{settings.BASE_URL.rstrip('/')}/{path}/{raw}/"
 
 
 def link_is_valid(raw, purpose):
-    return _scalar("SELECT token_is_valid(%s, %s)", [hash_token(raw), purpose])
+    return scalar("SELECT token_is_valid(%s, %s)", [hash_token(raw), purpose])
 
 
-def request_password_reset(email, build_url):
+def request_password_reset(email):
     """Email a reset link if the address has an account; do nothing otherwise. The caller answers the same either way."""
     raw, hashed = new_token()
     expires = timezone.now() + timedelta(hours=settings.RESET_LINK_HOURS)
-    if not _scalar("SELECT create_password_reset(%s, %s, %s)", [hashed, email, expires]):
+    if not scalar("SELECT create_password_reset(%s, %s, %s)", [hashed, email, expires]):
         return
     ports.get().email.send(
         email,
         _("Reset your password"),
         _("Use this link to choose a new password. It works once and expires in %(hours)s hour(s):\n\n%(url)s\n")
-        % {"hours": settings.RESET_LINK_HOURS, "url": build_url(raw)},
+        % {"hours": settings.RESET_LINK_HOURS, "url": link("reset", raw)},
     )
 
 
@@ -58,21 +62,28 @@ def complete_password_reset(raw, password):
     try:
         # A savepoint keeps the refusal from aborting the request's transaction.
         with transaction.atomic():
-            return _scalar("SELECT complete_password_reset(%s, %s)", [hash_token(raw), make_password(password)])
+            return scalar("SELECT complete_password_reset(%s, %s)", [hash_token(raw), make_password(password)])
     except DatabaseError as error:
         raise InvalidLink from error
 
 
-def invite_staff(company, email, build_url):
+def invite_staff(company, email):
     """Email an invitation to join `company` as staff. The database checks that the caller owns the company.
 
-    Raises IntegrityError when the address already has an account.
+    An address that already has an account is silently skipped, so the caller learns nothing about who is
+    registered. Raises TooManyInvitations at the daily limit.
     """
     raw, hashed = new_token()
     expires = timezone.now() + timedelta(days=settings.INVITE_LINK_DAYS)
-    with transaction.atomic():
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT create_invitation(%s, %s, %s, %s)", [hashed, email, company.pk, expires])
+    try:
+        with transaction.atomic():
+            created = scalar("SELECT create_invitation(%s, %s, %s, %s)", [hashed, email, company.pk, expires])
+    except DatabaseError as error:
+        if "too many invitations" in str(error):
+            raise TooManyInvitations from error
+        raise
+    if not created:
+        return
     ports.get().email.send(
         email,
         _("You are invited to join %(company)s") % {"company": company.name},
@@ -80,13 +91,13 @@ def invite_staff(company, email, build_url):
             "You have been invited to join %(company)s. Use this link to choose a password. "
             "It works once and expires in %(days)s days:\n\n%(url)s\n"
         )
-        % {"company": company.name, "days": settings.INVITE_LINK_DAYS, "url": build_url(raw)},
+        % {"company": company.name, "days": settings.INVITE_LINK_DAYS, "url": link("accept", raw)},
     )
 
 
 def accept_invitation(raw, password):
     try:
         with transaction.atomic():
-            return _scalar("SELECT accept_invitation(%s, %s)", [hash_token(raw), make_password(password)])
+            return scalar("SELECT accept_invitation(%s, %s)", [hash_token(raw), make_password(password)])
     except DatabaseError as error:
         raise InvalidLink from error

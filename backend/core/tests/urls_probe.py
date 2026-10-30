@@ -2,7 +2,7 @@
 
 from django.db import connection
 from django.http import JsonResponse
-from django.urls import path
+from django.urls import include, path
 
 from core.models import Company
 
@@ -30,4 +30,4 @@ def boom(request):
         cursor.execute("SELECT 1 / 0")
 
 
-urlpatterns = [path("probe/", probe), path("boom/", boom)]
+urlpatterns = [path("probe/", probe), path("boom/", boom), path("", include("config.urls"))]

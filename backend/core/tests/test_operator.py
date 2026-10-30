@@ -4,7 +4,7 @@ import pytest
 from django.core.management import CommandError, call_command
 
 from core import services
-from core.models import CompanyAccess, User
+from core.models import Company, CompanyAccess, User
 
 from .factories import PASSWORD, make_company, make_member
 
@@ -76,8 +76,6 @@ def test_an_address_that_already_has_an_account_cannot_become_a_second_owner_or_
 
 
 def test_a_failed_company_creation_leaves_nothing_behind(db):
-    from core.models import Company
-
     make_member("owner@acme.example", make_company(), CompanyAccess.OWNER)
     before = Company.objects.count()
 

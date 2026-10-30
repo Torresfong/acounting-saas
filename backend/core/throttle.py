@@ -2,35 +2,29 @@
 
 Only a hash of the email address is stored. The web role reaches the table through SECURITY DEFINER
 functions, because nobody is identified yet when these checks run.
+
+Each attempt is counted before the password is checked, and a successful sign-in clears the count, so
+parallel requests cannot all pass the check before any of them is counted. Limits are per address: a limit
+per client address would need the deployment's proxy settings to be trustworthy, and is left for go-live.
 """
 
 import hashlib
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import connection
+
+from .db import scalar
 
 
 def _key(email):
     return hashlib.sha256(email.strip().lower().encode()).hexdigest()
 
 
-def _call(sql, params):
-    with connection.cursor() as cursor:
-        cursor.execute(sql, params)
-        row = cursor.fetchone()
-        return row[0] if row else None
-
-
-def is_locked(email):
+def allow_attempt(email):
+    """Count a sign-in attempt for this address. False when the address is locked and the attempt must be refused."""
     window = timedelta(seconds=settings.LOGIN_FAILURE_WINDOW_SECONDS)
-    failures = _call("SELECT login_failures_in_window(%s, %s)", [_key(email), window])
-    return failures >= settings.LOGIN_MAX_FAILURES
-
-
-def record_failure(email):
-    _call("SELECT record_login_failure(%s)", [_key(email)])
+    return scalar("SELECT start_login_attempt(%s, %s, %s)", [_key(email), window, settings.LOGIN_MAX_FAILURES])
 
 
 def clear(email):
-    _call("SELECT clear_login_failures(%s)", [_key(email)])
+    scalar("SELECT clear_login_failures(%s)", [_key(email)])

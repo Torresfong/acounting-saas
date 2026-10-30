@@ -64,3 +64,9 @@ def as_production_connection(db):
                 cursor.execute("RESET SESSION AUTHORIZATION")
 
     return switch
+
+
+@pytest.fixture(autouse=True)
+def base_url(settings):
+    """Links in emails are built from BASE_URL, not from the request, so tests pin it to the test client's host."""
+    settings.BASE_URL = "http://testserver"

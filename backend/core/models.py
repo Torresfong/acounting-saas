@@ -73,6 +73,7 @@ class CompanyAccess(models.Model):
             models.UniqueConstraint(
                 fields=["company"], condition=models.Q(role="owner"), name="one_owner_per_company"
             ),
+            models.CheckConstraint(condition=models.Q(role__in=["owner", "staff", "accountant"]), name="known_role"),
         ]
 
 
@@ -113,7 +114,7 @@ class LoginFailure(models.Model):
     """
 
     email_hash = models.CharField(max_length=64, db_index=True)
-    at = models.DateTimeField(auto_now_add=True)
+    at = models.DateTimeField(auto_now_add=True, db_index=True)
 
 
 class AuthToken(models.Model):
@@ -126,7 +127,9 @@ class AuthToken(models.Model):
     RESET = "reset"
     INVITE = "invite"
 
-    purpose = models.CharField(max_length=10)
+    PURPOSES = [(RESET, "Password reset"), (INVITE, "Invitation")]
+
+    purpose = models.CharField(max_length=10, choices=PURPOSES)
     token_hash = models.CharField(max_length=64, unique=True)
     email = models.EmailField()
     company = models.ForeignKey(Company, null=True, blank=True, on_delete=models.CASCADE)

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-30 13:55+0800\n"
+"POT-Creation-Date: 2026-10-30 14:05+0800\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -100,7 +100,7 @@ msgid "Password"
 msgstr "密码"
 
 #: .\core\templates\password_reset.html:6
-#: .\core\templates\password_reset.html:9 .\core\tokens.py:51
+#: .\core\templates\password_reset.html:9 .\core\tokens.py:55
 msgid "Reset your password"
 msgstr "重置密码"
 
@@ -126,7 +126,7 @@ msgstr "再次输入密码"
 msgid "Save password"
 msgstr "保存密码"
 
-#: .\core\tokens.py:52
+#: .\core\tokens.py:56
 #, python-format
 msgid ""
 "Use this link to choose a new password. It works once and expires in %(hours)s hour(s):\n"
@@ -137,12 +137,12 @@ msgstr ""
 "\n"
 "%(url)s\n"
 
-#: .\core\tokens.py:78
+#: .\core\tokens.py:89
 #, python-format
 msgid "You are invited to join %(company)s"
 msgstr "邀请您加入 %(company)s"
 
-#: .\core\tokens.py:80
+#: .\core\tokens.py:91
 #, python-format
 msgid ""
 "You have been invited to join %(company)s. Use this link to choose a password. It works once and expires in %(days)s days:\n"
@@ -153,30 +153,35 @@ msgstr ""
 "\n"
 "%(url)s\n"
 
-#: .\core\views.py:38
+#: .\core\views.py:37
 msgid "Too many failed attempts. Try again in a few minutes."
 msgstr "失败次数过多，请几分钟后再试。"
 
-#: .\core\views.py:44
+#: .\core\views.py:42
 msgid "The email address or password is not correct."
 msgstr "电子邮件地址或密码不正确。"
 
-#: .\core\views.py:68
+#: .\core\views.py:66
 msgid "The two passwords do not match."
 msgstr "两次输入的密码不一致。"
 
-#: .\core\views.py:95
+#: .\core\views.py:93
 msgid "Choose a new password"
 msgstr "设置新密码"
 
-#: .\core\views.py:119
+#: .\core\views.py:113
 msgid "Invitation sent."
 msgstr "邀请已发送。"
 
 #: .\core\views.py:136
-msgid "That email address cannot be invited."
-msgstr "无法邀请该电子邮件地址。"
+#| msgid "Email address"
+msgid "Enter a valid email address."
+msgstr "请输入有效的电子邮件地址。"
 
-#: .\core\views.py:142
+#: .\core\views.py:141
+msgid "Too many invitations today. Try again tomorrow."
+msgstr "今天发送的邀请过多，请明天再试。"
+
+#: .\core\views.py:147
 msgid "Choose your password"
 msgstr "设置您的密码"

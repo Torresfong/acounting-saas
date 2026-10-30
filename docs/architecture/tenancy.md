@@ -56,19 +56,25 @@ Implements D40 (2), (4), (5), (7) and D48 for staff and accountants. Owner self-
 | Function | Returns | Notes |
 |---|---|---|
 | `auth_lookup(email)` | id, password hash, active flag | exact match, case-insensitive; nothing else about the user |
-| `login_failures_in_window`, `record_login_failure`, `clear_login_failures` | count / nothing | only a SHA-256 of the email is stored |
+| `start_login_attempt`, `clear_login_failures` | allowed / nothing | counts an attempt before the password is checked; only a SHA-256 of the email is stored |
 | `create_password_reset`, `token_is_valid`, `complete_password_reset` | bool / user id | at most three links an hour per account |
-| `create_invitation` | nothing | checks inside the database that the signed-in user owns the company; the role is fixed to staff |
+| `create_invitation` | whether one was created | checks inside the database that the signed-in user owns the company; the role is fixed to staff; at most 20 a day per company; an address that already has an account gets none and the caller is not told |
 | `accept_invitation` | user id | creates the user and the membership in one transaction |
 
 The web role has no direct access to `core_authtoken` or `core_loginfailure`, and may read only its own row of `core_user` (it needs the password hash to validate the session). It cannot create, change or delete users.
 
 **Forced row-level security and the owner.** `FORCE ROW LEVEL SECURITY` also hides rows from the table owner, and the functions run as the owner, so each table the functions touch has a `definer_functions` policy naming the migrating role (`core.rls.owner_policy_sql`). It opens nothing to `web` or to a login role that is a member of it. Verified against a non-superuser owner: the migrations run, and every function works under forced row-level security.
 
-**Identity and sessions.** The middleware takes the user id from the session, not from loading the user, because loading the user is itself a query that row-level security restricts and must run as the signed-in user. Sessions are stored in `django_session`, which the web role can use; it holds a session key and a signed blob naming a user id, no tenant data, and is the one listed exception to the rule that every table the web role can use is under row-level security. Django's `last_login` update is turned off, because the web role cannot write the user table and nobody is identified yet at sign-in; sign-ins belong in the audit trail (#33).
+**Identity and sessions.** The middleware takes the user id from the session and sets it as the database identity, then loads the user under that identity. If Django rejects the session (the password changed, or the user was deactivated), the identity is dropped again, so a stale session keeps no access to tenant data. Loading the user is itself a query that row-level security restricts, which is why the identity is set first. Sessions are stored in `django_session`, which the web role can use; it holds a session key and a signed blob naming a user id, no tenant data, and is the one listed exception to the rule that every table the web role can use is under row-level security. Django's `last_login` update is turned off, because the web role cannot write the user table and nobody is identified yet at sign-in; sign-ins belong in the audit trail (#33).
 
-**Throttling.** Five failed sign-ins for an address lock that address for fifteen minutes (also for addresses with no account, so the lock does not reveal which exist). A successful sign-in resets the count.
+**Throttling.** Five sign-in attempts for an address in fifteen minutes lock that address, including addresses with no account, so the lock does not reveal which exist. Each attempt is counted under a per-address lock before the password is checked and a successful sign-in clears the count, so parallel requests cannot all pass the check. Known limits: anyone who knows an address can lock its owner out for fifteen minutes, and there is no limit per client address, because that needs the deployment's proxy settings to be trustworthy (go-live, #39).
 
-**Links.** Reset links last an hour and invitations a week. Tokens are random, stored only as a SHA-256 hash, single use, and indistinguishable when unknown, expired or used. A password change ends the account's other sessions, because Django ties a session to a hash of the password.
+**Links.** Reset links last an hour and invitations a week. Tokens are random, stored only as a SHA-256 hash, single use, and indistinguishable when unknown, expired or used. A reset needs an active account. A password change ends the account's other sessions, because Django ties a session to a hash of the password. Links are built from `BASE_URL`, never from the request's Host header. Known limits: the reset form sends mail only for real accounts, so response time can reveal which addresses are registered, and three requests an hour per account can be used to delay that account's own reset. Both need a queue for outgoing mail (#27) to close.
 
 **Two-factor authentication** is a go-live blocker (D40 (7)) and is not built here. Sign-in ends in one function, `core.signin.complete_sign_in`, which is where it plugs in.
+
+**Not tenant tables.** `core_user`, `core_authtoken` and `core_loginfailure` have no company id. They are reached only through the functions above and, for the user's own row, the policy on `core_user`, so the standard tenant helper does not apply to them. The membership tables hold the company link.
+
+**Deployment settings that matter.** `ENVIRONMENT` must be set to something other than `development` in production: it turns on secure cookies and the `SECRET_KEY` check. HSTS, SSL redirects and the proxy header are not configured yet. All of this is part of the go-live work in #39.
+
+**Firm portal language.** The firm portal is English only (CLAUDE.md), but the sign-in and company pages are shared and follow the browser's language. Fixing an accountant's language belongs with the firm portal screens.
